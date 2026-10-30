@@ -1824,3 +1824,259 @@ elif good in k:
     print("PDF text-layer 11-digit extraction regex already correct.")
 else:
     raise SystemExit("PDF digit regex did not match known safe forms; refusing to build.")
+
+
+# User-requested usability refinements: copy OCR results, persistent backup folder,
+# larger search field, and per-denomination stock summary.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+
+# 1) Copy action on every camera/gallery OCR result card.
+anchor = '''                        card.addView(TextView(this@MainActivity).apply {
+                            text = "الفئة: " + match.record.category
+                            textSize = 14f; setTextColor(0xFF20C7E8.toInt())
+                        })
+                        results.addView(card)'''
+replacement = '''                        card.addView(TextView(this@MainActivity).apply {
+                            text = "الفئة: " + match.record.category
+                            textSize = 14f; setTextColor(0xFF20C7E8.toInt())
+                        })
+                        card.addView(Button(this@MainActivity).apply {
+                            text = "نسخ رقم الكرت"
+                            isAllCaps = false
+                            setOnClickListener {
+                                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("رقم الكرت", match.record.number))
+                                showStatus("تم نسخ رقم الكرت: " + match.record.number)
+                            }
+                        })
+                        results.addView(card)'''
+if anchor in k:
+    k = k.replace(anchor, replacement, 1)
+else:
+    raise SystemExit("OCR result copy-button anchor not found")
+
+# 2) Persistent SAF folder selection for both backup creation and restore browsing.
+# Store the directory URI and persist read/write access across app restarts.
+if "private val backupFolderPicker" not in k:
+    anchor = '''    private val restoreBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) confirmRestore(uri)
+    }'''
+    replacement = anchor + '''
+    private var pendingBackupAction: String = "backup"
+    private val backupFolderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            try {
+                contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+                getSharedPreferences("backup_settings", MODE_PRIVATE).edit()
+                    .putString("folder_uri", uri.toString()).apply()
+                showStatus("تم حفظ مجلد النسخ الاحتياطي لاستخدامه لاحقاً.")
+                if (pendingBackupAction == "restore") showSavedBackups()
+                else createBackupInSavedFolder()
+            } catch (e: Exception) {
+                showStatus("تعذر حفظ مجلد النسخ الاحتياطي: \${e.localizedMessage}")
+            }
+        } else showStatus("لم يتم اختيار مجلد النسخ الاحتياطي.")
+    }'''
+    if anchor not in k: raise SystemExit("Backup activity-result anchor not found")
+    k = k.replace(anchor, replacement, 1)
+
+# Replace the old always-prompt buttons with remembered-folder actions.
+old_buttons = '''        content.addView(action("إنشاء نسخة احتياطية واختيار مكان الحفظ", 0xFF13B981.toInt()) {
+            createBackup.launch("alkamel-cards-backup.db")
+        })
+        content.addView(action("استعادة نسخة احتياطية", 0xFF4385F5.toInt()) {
+            restoreBackup.launch(arrayOf("*/*"))
+        })'''
+new_buttons = '''        content.addView(action("إنشاء نسخة احتياطية", 0xFF13B981.toInt()) {
+            backupToSavedFolder()
+        })
+        content.addView(action("استعادة نسخة احتياطية", 0xFF4385F5.toInt()) {
+            restoreFromSavedFolder()
+        })
+        content.addView(action("تغيير مجلد النسخ الاحتياطي", 0xFF596579.toInt()) {
+            pendingBackupAction = "backup"
+            backupFolderPicker.launch(null)
+        })'''
+if old_buttons in k:
+    k = k.replace(old_buttons, new_buttons, 1)
+else:
+    raise SystemExit("Backup/restore button block not found")
+
+anchor = "    private fun writeBackup(uri: Uri) {"
+methods = r'''    private fun savedBackupTree(): Uri? =
+        getSharedPreferences("backup_settings", MODE_PRIVATE).getString("folder_uri", null)?.let { Uri.parse(it) }
+
+    private fun backupToSavedFolder() {
+        if (savedBackupTree() == null) {
+            pendingBackupAction = "backup"
+            backupFolderPicker.launch(null)
+        } else createBackupInSavedFolder()
+    }
+
+    private fun restoreFromSavedFolder() {
+        if (savedBackupTree() == null) {
+            pendingBackupAction = "restore"
+            backupFolderPicker.launch(null)
+        } else showSavedBackups()
+    }
+
+    private fun createBackupInSavedFolder() {
+        val tree = savedBackupTree() ?: run {
+            pendingBackupAction = "backup"
+            backupFolderPicker.launch(null)
+            return
+        }
+        lifecycleScope.launch {
+            try {
+                val backupName = "alkamel-cards-backup-" +
+                    java.text.SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(java.util.Date()) + ".db"
+                withContext(Dispatchers.IO) {
+                    db.writableDatabase.rawQuery("PRAGMA wal_checkpoint(FULL)", null).use { while (it.moveToNext()) {} }
+                    val source = getDatabasePath("alkamel_cards.db")
+                    if (!source.exists()) throw IllegalStateException("قاعدة البيانات غير موجودة")
+                    val parent = android.provider.DocumentsContract.buildDocumentUriUsingTree(
+                        tree, android.provider.DocumentsContract.getTreeDocumentId(tree)
+                    )
+                    val target = android.provider.DocumentsContract.createDocument(
+                        contentResolver, parent, "application/octet-stream", backupName
+                    ) ?: throw IllegalStateException("تعذر إنشاء ملف النسخة داخل المجلد المحدد")
+                    contentResolver.openOutputStream(target, "wt")?.use { output ->
+                        source.inputStream().use { input -> input.copyTo(output) }
+                    } ?: throw IllegalStateException("تعذرت الكتابة إلى مجلد النسخ")
+                }
+                showStatus("تم حفظ النسخة تلقائياً في المجلد المحفوظ: $backupName")
+                AlertDialog.Builder(this@MainActivity).setTitle("اكتملت النسخة الاحتياطية")
+                    .setMessage("تم حفظ النسخة في مجلدك المحفوظ دون طلب تحديد المسار مرة أخرى.")
+                    .setPositiveButton("حسناً", null).show()
+            } catch (e: Exception) {
+                showStatus("فشل إنشاء النسخة الاحتياطية: \${e.localizedMessage}")
+            }
+        }
+    }
+
+    private fun showSavedBackups() {
+        val tree = savedBackupTree() ?: run {
+            pendingBackupAction = "restore"
+            backupFolderPicker.launch(null)
+            return
+        }
+        lifecycleScope.launch {
+            try {
+                val entries = withContext(Dispatchers.IO) {
+                    val children = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(
+                        tree, android.provider.DocumentsContract.getTreeDocumentId(tree)
+                    )
+                    val found = mutableListOf<Pair<String, Uri>>()
+                    contentResolver.query(
+                        children,
+                        arrayOf(
+                            android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                            android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME
+                        ),
+                        null, null, null
+                    )?.use { cursor ->
+                        val idCol = cursor.getColumnIndexOrThrow(android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                        val nameCol = cursor.getColumnIndexOrThrow(android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                        while (cursor.moveToNext()) {
+                            val name = cursor.getString(nameCol) ?: continue
+                            if (name.endsWith(".db", true)) {
+                                val docId = cursor.getString(idCol)
+                                found.add(name to android.provider.DocumentsContract.buildDocumentUriUsingTree(tree, docId))
+                            }
+                        }
+                    }
+                    found.sortedByDescending { it.first }
+                }
+                if (entries.isEmpty()) {
+                    showStatus("لا توجد نسخ احتياطية بامتداد DB داخل المجلد المحفوظ.")
+                    AlertDialog.Builder(this@MainActivity).setTitle("لا توجد نسخ")
+                        .setMessage("المجلد المحفوظ لا يحتوي على ملفات نسخ احتياطية.")
+                        .setPositiveButton("حسناً", null).show()
+                } else {
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("اختر النسخة التي تريد استعادتها")
+                        .setItems(entries.map { it.first }.toTypedArray()) { _, which ->
+                            confirmRestore(entries[which].second)
+                        }.setNegativeButton("إلغاء", null).show()
+                }
+            } catch (e: Exception) {
+                showStatus("تعذر عرض النسخ داخل المجلد المحفوظ: \${e.localizedMessage}")
+            }
+        }
+    }
+
+'''
+if "private fun savedBackupTree()" not in k:
+    if anchor not in k: raise SystemExit("Backup method insertion anchor not found")
+    k = k.replace(anchor, methods + anchor, 1)
+
+# 3) Larger, more legible search input with stronger border and hint contrast.
+k = k.replace('hint = "اكتب رقم الكرت الناقص هنا"; textSize = 19f; setSingleLine(true)',
+              'hint = "اكتب رقم الكرت الناقص هنا"; textSize = 22f; setSingleLine(true)')
+k = k.replace('setTextColor(0xFFFFFFFF.toInt()); setHintTextColor(0xFFB7C4D8.toInt())',
+              'setTextColor(0xFFFFFFFF.toInt()); setHintTextColor(0xFFE0E8F5.toInt())')
+k = k.replace('background = bg(0xFF17243A.toInt(), 0xFF5D7395.toInt(), 10f)\n            minHeight = 58',
+              'background = bg(0xFF17243A.toInt(), 0xFF20C7E8.toInt(), 14f)\n            minHeight = 72')
+k = k.replace('searchRow.addView(searchBox, LinearLayout.LayoutParams(0, 60, 1f))',
+              'searchRow.addView(searchBox, LinearLayout.LayoutParams(0, 74, 1f))', 1)
+k = k.replace('searchRow.addView(action("بحث 🔎", 0xFFFF9800.toInt()) { searchCards() }, LinearLayout.LayoutParams(-2, 60))',
+              'searchRow.addView(action("بحث 🔎", 0xFFFF9800.toInt()) { searchCards() }, LinearLayout.LayoutParams(-2, 74))', 1)
+
+# 4) Replace the single total-count tile with a compact four-denomination summary.
+old_stats = '''        val stats = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background = bg(0xFF090F22.toInt()); setPadding(14, 12, 14, 12)
+        }
+        val stat = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        stat.addView(txt("إجمالي الكروت المخزنة", 13f, muted))
+        stat.addView(txt(db.count().toString() + " كرت", 27f, 0xFFFFFFFF.toInt(), true))
+        stats.addView(stat, LinearLayout.LayoutParams(0, -2, 1f))
+        stats.addView(TextView(this).apply {
+            text = "♢"; textSize = 30f; gravity = Gravity.CENTER; setTextColor(gold)
+            background = bg(0xFF282522.toInt(), 0xFF73521A.toInt()); layoutParams = LinearLayout.LayoutParams(62, 62)
+        })
+        hero.addView(stats, lp())'''
+new_stats = '''        val stats = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = bg(0xFF090F22.toInt()); setPadding(10, 10, 10, 10)
+        }
+        stats.addView(txt("المخزون حسب فئة الكرت", 15f, gold, true))
+        val statsGrid = android.widget.GridLayout(this).apply {
+            columnCount = 2; layoutDirection = View.LAYOUT_DIRECTION_RTL
+        }
+        val denominationColors = listOf(0xFFE53935.toInt(), purple, green, cyan)
+        categories.forEachIndexed { index, denomination ->
+            val item = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+                background = bg(0xFF141F35.toInt(), denominationColors[index], 12f)
+                setPadding(10, 8, 10, 8)
+            }
+            item.addView(txt(denomination, 13f, denominationColors[index], true),
+                LinearLayout.LayoutParams(0, -2, 1f))
+            item.addView(txt(db.countCategory(denomination).toString() + " كرت", 15f, 0xFFFFFFFF.toInt(), true))
+            val gp = android.widget.GridLayout.LayoutParams().apply {
+                width = 0; height = -2; columnSpec = android.widget.GridLayout.spec(index % 2, 1f)
+                rowSpec = android.widget.GridLayout.spec(index / 2); setMargins(4, 4, 4, 4)
+            }
+            statsGrid.addView(item, gp)
+        }
+        stats.addView(statsGrid)
+        hero.addView(stats, lp())'''
+if old_stats in k:
+    k = k.replace(old_stats, new_stats, 1)
+else:
+    raise SystemExit("Total stock summary block not found")
+
+# 5) Result markers: green only for a real suffix match; non-suffix candidates are red.
+# The label and border use the same meaning, avoiding the old ambiguous blue marker.
+k = k.replace('if (match.record.number.endsWith(match.visible)) 0xFF13B981.toInt() else 0xFF4385F5.toInt()',
+              'if (match.record.number.endsWith(match.visible)) 0xFF13B981.toInt() else 0xFFE53935.toInt()')
+k = k.replace('textSize = 14f; setTextColor(0xFFFFB300.toInt())\n                        })\n                        card.addView(TextView(this@MainActivity).apply {\n                            text = "الجزء المقروء: " + match.visible',
+              'textSize = 14f; setTextColor(if (match.record.number.endsWith(match.visible)) 0xFF13B981.toInt() else 0xFFE53935.toInt())\n                        })\n                        card.addView(TextView(this@MainActivity).apply {\n                            text = "الجزء المقروء: " + match.visible', 1)
+
+main.write_text(k)
+print("Applied requested copy, persistent backup folder, search-field, stock summary, and match-indicator improvements.")
