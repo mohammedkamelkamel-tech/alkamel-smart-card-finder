@@ -52,8 +52,18 @@ jobs:
       - name: Build APK
         run: gradle assembleDebug
 
-      - name: Upload APK
+      # Package the exact patched source used for this successful build.
+      - name: Create project and APK bundle
+        run: |
+          mkdir -p release_bundle
+          cp app/build/outputs/apk/debug/*.apk release_bundle/application.apk
+          zip -qr release_bundle/project.zip . \
+            -x "./.git/*" "./.gradle/*" "./**/build/*" "./release_bundle/*" "./extracted/*"
+          cd release_bundle
+          zip -q ../alkamel-smart-card-finder-package.zip project.zip application.apk
+
+      - name: Upload project and APK package
         uses: actions/upload-artifact@v4
         with:
-          name: alkamel-smart-card-finder-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: alkamel-smart-card-finder-project-and-apk
+          path: alkamel-smart-card-finder-package.zip
