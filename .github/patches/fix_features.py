@@ -2101,3 +2101,59 @@ if "android:icon=" not in tag:
     manifest_text = manifest_text[:application_tag.start()] + tag + manifest_text[application_tag.end():]
 manifest.write_text(manifest_text)
 print("Installed approved AlKamel launcher icon and manifest references.")
+
+
+# Final UI polish requested: show the app logo beside the Arabic brand,
+# remove the technical package name, and render actual line breaks in bottom tabs.
+k = main.read_text()
+
+old_header = '''        header.addView(TextView(this).apply {
+            text = "▣"; textSize = 30f; gravity = Gravity.CENTER; setTextColor(navy)
+            background = bg(0xFFFF9800.toInt(), 0xFFFF9800.toInt(), 18f)
+            layoutParams = LinearLayout.LayoutParams(58, 58).apply { setMargins(4, 0, 10, 0) }
+        })
+        val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        brand.addView(txt("الكامل", 22f, 0xFFFFFFFF.toInt(), true))
+        brand.addView(txt("الباحث الذكي", 13f, gold, true))
+        brand.addView(txt("com.alkamel.cardfinder", 11f, muted))
+        header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))'''
+new_header = '''        val brand = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val brandLogo = android.widget.ImageView(this).apply {
+            setImageResource(R.mipmap.ic_launcher)
+            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+            background = bg(0xFFFF9800.toInt(), 0xFFFF9800.toInt(), 14f)
+            clipToOutline = true
+            layoutParams = LinearLayout.LayoutParams(54, 54).apply { setMargins(4, 0, 10, 0) }
+            contentDescription = "شعار تطبيق الكامل"
+        }
+        brand.addView(brandLogo)
+        val brandText = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        brandText.addView(txt("الكامل", 22f, 0xFFFFFFFF.toInt(), true))
+        brandText.addView(txt("الباحث الذكي", 13f, gold, true))
+        brand.addView(brandText)
+        header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))'''
+if old_header not in k:
+    raise SystemExit("Expected app header block not found; refusing unsafe UI patch.")
+k = k.replace(old_header, new_header, 1)
+
+# The escaped slash-n sequences were rendered literally on screen.
+# Replace only the bottom-navigation label literals with real Kotlin newline escapes.
+old_nav = '''text = when (i) { 0 -> "⌂\\\\n" + name; 1 -> "⌕\\\\n" + name; 2 -> "◎\\\\n" + name; 3 -> "⇧\\\\n" + name; 4 -> "▤\\\\n" + name; else -> "☷\\\\n" + name }'''
+new_nav = '''text = when (i) { 0 -> "⌂\\\\n" + name; 1 -> "⌕\\\\n" + name; 2 -> "◎\\\\n" + name; 3 -> "⇧\\\\n" + name; 4 -> "▤\\\\n" + name; else -> "☷\\\\n" + name }'''
+# In the patch's Python source, old_nav represents the two-character backslash+n
+# sequence in the Kotlin file; new_nav emits the single Kotlin newline escape.
+if old_nav not in k:
+    # Accept an already-correct Kotlin escape, but still verify it exists.
+    if '''text = when (i) { 0 -> "⌂\\n" + name; 1 -> "⌕\\n" + name; 2 -> "◎\\n" + name; 3 -> "⇧\\n" + name; 4 -> "▤\\n" + name; else -> "☷\\n" + name }''' not in k:
+        raise SystemExit("Bottom navigation label block not found.")
+else:
+    k = k.replace(old_nav, new_nav, 1)
+
+main.write_text(k)
+print("Removed package identifier, added launcher logo beside app name, and fixed bottom navigation newlines.")
