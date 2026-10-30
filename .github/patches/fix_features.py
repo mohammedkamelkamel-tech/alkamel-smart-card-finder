@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 p = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
 s = p.read_text()
 
