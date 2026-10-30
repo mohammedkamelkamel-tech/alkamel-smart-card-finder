@@ -564,3 +564,117 @@ k = k[:a] + '''    private fun importDocument(uri: Uri) {
 ''' + k[b:]
 main.write_text(k)
 print("Patched search feedback, keyboard search, and denomination/file validation.")
+
+
+# OCR recovery: use multiple OCR passes, combine visible digit fragments in order,
+# search the local card database, and explicitly display the missing middle digits.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+a = k.index("    private fun readImage(uri: Uri) {")
+b = k.index("    private suspend fun recognize(image: InputImage): Text =", a)
+k = k[:a] + '''    private fun readImage(uri: Uri) {
+        lifecycleScope.launch {
+            showStatus("جارٍ قراءة الأرقام الظاهرة من الصورة والبحث في ملفات الكروت...")
+            results.removeAllViews()
+            try {
+                val bitmap = withContext(Dispatchers.IO) {
+                    contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+                        ?: throw IllegalStateException("تعذر فتح الصورة المختارة")
+                }
+                val attempts = recognizeAttempts(bitmap)
+                bitmap.recycle()
+                val fragments = attempts.flatMap { text ->
+                    normalizeDigits(text).split(Regex("[^0-9]+")).filter { it.length >= 3 }
+                }.distinct().sortedByDescending { it.length }
+
+                data class Recovery(val record: CardRecord, val visible: String, val missing: String)
+                val recovered = linkedMapOf<String, Recovery>()
+
+                fragments.filter { it.length >= 7 }.forEach { fragment ->
+                    db.search(fragment).forEach { record ->
+                        recovered.putIfAbsent(record.number, Recovery(record, fragment, ""))
+                    }
+                }
+
+                for (i in fragments.indices) {
+                    for (j in fragments.indices) {
+                        if (i == j) continue
+                        val first = fragments[i]
+                        val second = fragments[j]
+                        if (first.length < 3 || second.length < 3 || first.length + second.length > 11) continue
+                        db.search(first + second).forEach { record ->
+                            val firstAt = record.number.indexOf(first)
+                            val secondAt = if (firstAt >= 0) record.number.indexOf(second, firstAt + first.length) else -1
+                            if (firstAt >= 0 && secondAt >= firstAt + first.length) {
+                                val missing = record.number.substring(firstAt + first.length, secondAt)
+                                recovered.putIfAbsent(record.number, Recovery(record, first + second, missing))
+                            }
+                        }
+                    }
+                }
+
+                if (recovered.isEmpty()) {
+                    showStatus("لم أجد رقماً مطابقاً في الملفات. جرّب تصوير الكرت بشكل أوضح مع ظهور سطر الرقم.")
+                    results.addView(TextView(this@MainActivity).apply {
+                        text = "الأرقام التي قرأتها الكاميرا: " + fragments.joinToString("  |  ").ifBlank { "لم يتم التعرف على أرقام" }
+                        textSize = 15f; setTextColor(0xFFFFFFFF.toInt()); setPadding(12, 12, 12, 12)
+                    })
+                } else {
+                    showStatus("تم العثور على " + recovered.size + " احتمال مطابق في قاعدة البيانات.")
+                    recovered.values.take(30).forEachIndexed { index, item ->
+                        val card = LinearLayout(this@MainActivity).apply {
+                            orientation = LinearLayout.VERTICAL
+                            setPadding(14, 12, 14, 12)
+                            background = android.graphics.drawable.GradientDrawable().apply {
+                                setColor(0xFF111A2E.toInt()); setStroke(2, 0xFF20B981.toInt()); cornerRadius = 18f
+                            }
+                        }
+                        card.addView(TextView(this@MainActivity).apply {
+                            text = "الاحتمال \${index + 1}"; textSize = 13f; setTextColor(0xFFFFB300.toInt())
+                        })
+                        card.addView(TextView(this@MainActivity).apply {
+                            text = "الأرقام المقروءة: " + item.visible; textSize = 16f; setTextColor(0xFFCAD3E2.toInt())
+                        })
+                        card.addView(TextView(this@MainActivity).apply {
+                            text = "الأرقام التي أكملها التطبيق: " + if (item.missing.isBlank()) "لا يوجد — الرقم مقروء بالكامل" else item.missing
+                            textSize = 17f; setTextColor(0xFF20C7E8.toInt())
+                        })
+                        card.addView(TextView(this@MainActivity).apply {
+                            text = "رقم الكرت بالكامل: " + item.record.number; textSize = 22f
+                            typeface = android.graphics.Typeface.DEFAULT_BOLD; setTextColor(0xFFFFFFFF.toInt())
+                        })
+                        card.addView(TextView(this@MainActivity).apply {
+                            text = "الفئة: " + item.record.category; textSize = 14f; setTextColor(0xFF9AA8C0.toInt())
+                        })
+                        results.addView(card)
+                        (card.layoutParams as? LinearLayout.LayoutParams)?.setMargins(0, 8, 0, 8)
+                    }
+                }
+            } catch (e: Exception) {
+                showStatus("تعذرت قراءة الصورة والبحث عنها: \${e.localizedMessage}")
+            }
+        }
+    }
+
+    private suspend fun recognizeAttempts(bitmap: Bitmap): List<String> {
+        val attempts = mutableListOf<String>()
+        attempts.add(recognize(InputImage.fromBitmap(bitmap, 0)).text)
+        for (threshold in listOf(false, true)) {
+            val processed = enhanceForDarkDigits(bitmap, threshold)
+            try { attempts.add(recognize(InputImage.fromBitmap(processed, 0)).text) }
+            finally { processed.recycle() }
+        }
+        return attempts
+    }
+
+''' + k[b:]
+a = k.index("    private suspend fun recognizeBest(bitmap: Bitmap): String {")
+b = k.index("    private fun enhanceForDarkDigits(", a)
+k = k[:a] + '''    private suspend fun recognizeBest(bitmap: Bitmap): String =
+        recognizeAttempts(bitmap).maxByOrNull {
+            Regex("\\\\\\\\d{7,15}").findAll(normalizeDigits(it)).count()
+        }.orEmpty()
+
+''' + k[b:]
+main.write_text(k)
+print("Added OCR fragment recovery and explicit missing-digit/full-number results.")
