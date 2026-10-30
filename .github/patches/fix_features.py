@@ -671,3 +671,59 @@ k = k[:a] + '''    private fun readImage(uri: Uri) {
 # Keep the existing recognizeBest helper; OCR image flow uses recognizeAttempts.
 main.write_text(k)
 print("Added OCR fragment recovery and explicit missing-digit/full-number results.")
+
+
+# Search incomplete card numbers within the selected denomination only.
+# Matching is order-preserving: missing digits may be at the beginning, middle, or end.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+
+a = k.index("    fun search(query: String): List<CardRecord> {")
+b = k.index("    fun countCategory(category: String): Int {", a)
+k = k[:a] + '''    fun search(query: String, category: String? = null): List<CardRecord> {
+        val q = query.filter { it in '0'..'9' }
+        if (q.length < 3) return emptyList()
+        val pattern = "%" + q.toCharArray().joinToString("%") + "%"
+        val sql = if (category.isNullOrBlank()) {
+            "SELECT number, MIN(category), MIN(source), MIN(page) FROM cards WHERE number LIKE ? GROUP BY number LIMIT 5000"
+        } else {
+            "SELECT number, MIN(category), MIN(source), MIN(page) FROM cards WHERE number LIKE ? AND category=? GROUP BY number LIMIT 5000"
+        }
+        val args = if (category.isNullOrBlank()) arrayOf(pattern) else arrayOf(pattern, category)
+        val cursor = readableDatabase.rawQuery(sql, args)
+        val out = mutableListOf<CardRecord>()
+        cursor.use { while (it.moveToNext()) out.add(CardRecord(it.getString(0), it.getString(1), it.getString(2), it.getInt(3))) }
+
+        fun isSubsequence(candidate: String, needle: String): Boolean {
+            var pos = 0
+            for (digit in needle) {
+                val at = candidate.indexOf(digit, pos)
+                if (at < 0) return false
+                pos = at + 1
+            }
+            return true
+        }
+        fun score(number: String): Int {
+            if (number == q) return -1000
+            if (number.startsWith(q)) return 0
+            if (number.endsWith(q)) return 1
+            if (number.contains(q)) return 2
+            return 10 + (number.length - q.length)
+        }
+        return out.filter { isSubsequence(it.number, q) }
+            .sortedWith(compareBy<CardRecord> { score(it.number) }
+                .thenBy { it.number.length - q.length }
+                .thenBy { it.number })
+            .take(200)
+    }
+
+''' + k[b:]
+
+# Typed search and OCR recovery are both constrained to the currently selected card category.
+k = k.replace("val matches = db.search(q)", "val matches = db.search(q, categories.getOrNull(category.selectedItemPosition))")
+k = k.replace("db.search(fragment).forEach", "db.search(fragment, categories.getOrNull(category.selectedItemPosition)).forEach")
+k = k.replace("db.search(first + second).forEach", "db.search(first + second, categories.getOrNull(category.selectedItemPosition)).forEach")
+k = k.replace('showStatus("تم العثور على " + recovered.size + " احتمال مطابق في قاعدة البيانات.")',
+              'showStatus("تم العثور على " + recovered.size + " احتمال مطابق في فئة " + categories.getOrNull(category.selectedItemPosition) + ".")')
+main.write_text(k)
+print("Updated database matching to search within the selected category and support missing digits at either end or in the middle.")
