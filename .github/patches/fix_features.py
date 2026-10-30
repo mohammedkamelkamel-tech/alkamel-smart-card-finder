@@ -816,7 +816,7 @@ k = k.replace(
 k = k.replace('searchRow.addView(searchBox, LinearLayout.LayoutParams(0, -2, 1f))',
               'searchRow.addView(searchBox, LinearLayout.LayoutParams(0, 60, 1f))')
 k = k.replace('searchRow.addView(action("بحث  ←", 0xFFFF9800.toInt()) { searchCards() })',
-              'searchRow.addView(action("بحث 🔎", 0xFFFF9800.toInt()) { searchCards() }, LinearLayout.LayoutParams(WRAP_CONTENT, 60))')
+              'searchRow.addView(action("بحث 🔎", 0xFFFF9800.toInt()) { searchCards() }, LinearLayout.LayoutParams(-2, 60))')
 
 # Make the denomination cards themselves selectable and show selection with a check mark/border.
 old = '''            card.addView(txt(cat, 17f, colors[index], true))
