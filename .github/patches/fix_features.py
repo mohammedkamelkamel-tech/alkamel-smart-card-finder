@@ -984,3 +984,13 @@ k = k.replace(
 
 main.write_text(k)
 print("Applied exact dot-mask search and merged OCR passes for improved PDF extraction.")
+
+# A dot must be enterable on every Android keyboard; use a text keyboard for the mask field.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+k = k.replace(
+    "inputType = android.text.InputType.TYPE_CLASS_NUMBER",
+    "inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD"
+)
+main.write_text(k)
+print("Enabled literal dot entry in the card search box.")
