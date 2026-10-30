@@ -1482,3 +1482,43 @@ if "private suspend fun recognizeBest(bitmap: Bitmap): String" not in k:
     k = k.replace(anchor, helpers + anchor, 1)
 main.write_text(k)
 print("Restored OCR preprocessing helper functions required by camera/gallery and PDF OCR.")
+
+
+# Reduce installed APK size without sacrificing offline OCR:
+# - package only ARM ABIs used by Android phones (32-bit and 64-bit)
+# - enable R8 code shrinking and resource shrinking for the debug-signed APK
+# - retain ML Kit's bundled OCR implementation so recognition remains offline.
+from pathlib import Path
+import re
+
+gradle_file = Path("app/build.gradle")
+g = gradle_file.read_text()
+if "abiFilters" not in g:
+    g = g.replace(
+        "        versionName \\"1.0.0\\"",
+        "        versionName \\"1.0.0\\"\\n        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }"
+    )
+if "minifyEnabled true" not in g:
+    marker = "\\n    buildFeatures { buildConfig true }"
+    build_types = '''
+    buildTypes {
+        debug {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+'''
+    if marker not in g:
+        raise SystemExit("Cannot find Android buildFeatures insertion point")
+    g = g.replace(marker, "\\n" + build_types + marker, 1)
+gradle_file.write_text(g)
+
+rules = Path("app/proguard-rules.pro")
+if not rules.exists():
+    rules.write_text("""
+# ML Kit bundled OCR is required for offline card recognition.
+-keep class com.google.mlkit.vision.text.** { *; }
+-dontwarn com.google.mlkit.**
+""".lstrip())
+print("Enabled R8/resource shrinking and ARM-only native packaging while retaining offline OCR.")
