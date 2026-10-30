@@ -1285,3 +1285,14 @@ bulk = '''    fun insertMany(numbers: List<String>, category: String, source: St
 k = k[:a] + bulk + k[b:]
 main.write_text(k)
 print("Added user-selected backup/restore, high-contrast selectors, requested category colors, and faster indexed batch insertion.")
+
+
+# Correct Kotlin interpolation in the PDF page progress label (avoid showing literal dollar signs).
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+k = k.replace(
+    r'الصفحة \${i + 1} من \${renderer.pageCount}',
+    'الصفحة \${i + 1} من \${renderer.pageCount}'
+)
+main.write_text(k)
+print("Fixed PDF progress label interpolation.")
