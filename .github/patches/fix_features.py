@@ -1501,3 +1501,129 @@ rules = Path("app/proguard-rules.pro")
 if not rules.exists():
     rules.write_text("# ML Kit bundled OCR remains available offline.\n-keep class com.google.mlkit.vision.text.** { *; }\n-dontwarn com.google.mlkit.**\n")
 print("Enabled R8/resource shrinking and ARM-only packaging while retaining offline OCR.")
+
+
+# Fix camera/gallery false positives: contiguous matches only, suffix-first ranking,
+# and a focused crop pass over the card-number band to recover longer trailing digits.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+a = k.index("    private fun readImage(uri: Uri) {")
+b = k.index("    private suspend fun recognize(image: InputImage): Text =", a)
+ocr = '''    private fun readImage(uri: Uri) {
+        lifecycleScope.launch {
+            showStatus("جارٍ قراءة رقم الكرت والبحث عن نهايته في المخزون...")
+            results.removeAllViews()
+            try {
+                val bitmap = withContext(Dispatchers.IO) {
+                    contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+                        ?: throw IllegalStateException("تعذر فتح الصورة")
+                }
+                val attempts = mutableListOf<String>()
+                attempts.addAll(recognizeAttempts(bitmap))
+
+                // OCR focused on the horizontal band where the printed card number usually appears.
+                val top = (bitmap.height * 0.22f).toInt().coerceIn(0, bitmap.height - 1)
+                val bottom = (bitmap.height * 0.68f).toInt().coerceIn(top + 1, bitmap.height)
+                val band = Bitmap.createBitmap(bitmap, 0, top, bitmap.width, bottom - top)
+                try {
+                    attempts.addAll(recognizeAttempts(band))
+                } finally { band.recycle(); bitmap.recycle() }
+
+                val fragments = attempts.flatMap { text ->
+                    normalizeDigits(text).split(Regex("[^0-9]+"))
+                        .map { it.filter { ch -> ch in '0'..'9' } }
+                        .filter { it.length >= 4 && it.length <= 11 }
+                }.distinct().sortedWith(compareByDescending<String> { it.length }.thenBy { it })
+
+                val selectedCategory = categories.getOrNull(category.selectedItemPosition)
+                data class OcrMatch(val record: CardRecord, val visible: String, val rank: Int)
+                val found = linkedMapOf<String, OcrMatch>()
+
+                // Do not use fuzzy subsequence matches for OCR: "897" must not match
+                // numbers that merely contain 8, then 9, then 7 in unrelated positions.
+                for (fragment in fragments) {
+                    val candidates = db.search(fragment, selectedCategory)
+                        .filter { it.number.endsWith(fragment) || it.number.contains(fragment) }
+                    candidates.forEach { record ->
+                        val rank = when {
+                            record.number.endsWith(fragment) -> 0
+                            record.number.contains(fragment) -> 1
+                            else -> 9
+                        } * 100 + (11 - fragment.length)
+                        val old = found[record.number]
+                        if (old == null || rank < old.rank) {
+                            found[record.number] = OcrMatch(record, fragment, rank)
+                        }
+                    }
+                }
+
+                // If OCR reads two separate adjacent groups, join them and still require
+                // a contiguous match in the actual stored number.
+                for (i in fragments.indices) for (j in fragments.indices) {
+                    if (i == j) continue
+                    val joined = fragments[i] + fragments[j]
+                    if (joined.length !in 7..11) continue
+                    db.search(joined, selectedCategory)
+                        .filter { it.number.contains(joined) }
+                        .forEach { record ->
+                            val rank = (if (record.number.endsWith(joined)) 0 else 100) + (11 - joined.length)
+                            val old = found[record.number]
+                            if (old == null || rank < old.rank) found[record.number] = OcrMatch(record, joined, rank)
+                        }
+                }
+
+                val sorted = found.values.sortedWith(
+                    compareBy<OcrMatch> { it.rank }
+                        .thenBy { if (it.record.category == selectedCategory) 0 else 1 }
+                        .thenBy { it.record.number }
+                ).take(20)
+
+                if (sorted.isEmpty()) {
+                    showStatus("لم أجد تطابقاً متصلاً كافياً. جرّب صورة أوضح تُظهر آخر 5 إلى 7 أرقام.")
+                    results.addView(TextView(this@MainActivity).apply {
+                        text = "الأجزاء التي قرأتها الكاميرا: " + fragments.joinToString("  |  ").ifBlank { "لم يتم التعرف على أرقام" } +
+                            "\\\\nلن أعرض أرقاماً متشابهة بشكل عشوائي؛ يلزم تطابق متصل مع رقم محفوظ."
+                        textSize = 15f; setTextColor(0xFFFFFFFF.toInt()); setPadding(12, 12, 12, 12)
+                    })
+                } else {
+                    showStatus("تم العثور على " + sorted.size + " نتيجة مرتبة حسب تطابق نهاية الرقم.")
+                    sorted.forEachIndexed { index, match ->
+                        val card = LinearLayout(this@MainActivity).apply {
+                            orientation = LinearLayout.VERTICAL; setPadding(14, 12, 14, 12)
+                            background = android.graphics.drawable.GradientDrawable().apply {
+                                setColor(0xFF111A2E.toInt())
+                                setStroke(2, if (match.record.number.endsWith(match.visible)) 0xFF13B981.toInt() else 0xFF4385F5.toInt())
+                                cornerRadius = 18f
+                            }
+                        }
+                        card.addView(TextView(this@MainActivity).apply {
+                            text = (index + 1).toString() + " — " +
+                                if (match.record.number.endsWith(match.visible)) "تطابق نهاية الرقم" else "تطابق داخل الرقم"
+                            textSize = 14f; setTextColor(0xFFFFB300.toInt())
+                        })
+                        card.addView(TextView(this@MainActivity).apply {
+                            text = "الجزء المقروء: " + match.visible
+                            textSize = 15f; setTextColor(0xFFCAD3E2.toInt())
+                        })
+                        card.addView(TextView(this@MainActivity).apply {
+                            text = "رقم الكرت الكامل: " + match.record.number
+                            textSize = 22f; typeface = android.graphics.Typeface.DEFAULT_BOLD
+                            setTextColor(0xFFFFFFFF.toInt())
+                        })
+                        card.addView(TextView(this@MainActivity).apply {
+                            text = "الفئة: " + match.record.category
+                            textSize = 14f; setTextColor(0xFF20C7E8.toInt())
+                        })
+                        results.addView(card)
+                    }
+                }
+            } catch (e: Exception) {
+                showStatus("تعذر البحث في الصورة: " + (e.localizedMessage ?: "خطأ غير معروف"))
+            }
+        }
+    }
+
+'''
+k = k[:a] + ocr + k[b:]
+main.write_text(k)
+print("Updated OCR image matching: number-band crop, contiguous-only matches, suffix-first ranking, and 20-result cap.")
