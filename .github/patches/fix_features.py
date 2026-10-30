@@ -1627,3 +1627,94 @@ ocr = '''    private fun readImage(uri: Uri) {
 k = k[:a] + ocr + k[b:]
 main.write_text(k)
 print("Updated OCR image matching: number-band crop, contiguous-only matches, suffix-first ranking, and 20-result cap.")
+
+
+# Fix manual prefix...suffix searches. Keep the two visible ends as separate anchors:
+# e.g. 65897...240 must match a card starting with 65897 and ending with 240.
+# Also accept the reverse order because Android RTL text fields can visually reorder
+# the two groups (the screenshot shows 240...65897).
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+
+# Add a dedicated end-anchored matcher to the database helper.
+if "fun searchByEnds(" not in k:
+    anchor = "    fun countCategory(category: String): Int {"
+    method = '''    fun searchByEnds(first: String, last: String, category: String? = null): List<CardRecord> {
+        val a = first.filter { it in '0'..'9' }
+        val b = last.filter { it in '0'..'9' }
+        if (a.length < 2 || b.length < 2) return emptyList()
+        val sql = if (category.isNullOrBlank()) {
+            "SELECT number, MIN(category), MIN(source), MIN(page) FROM cards GROUP BY number"
+        } else {
+            "SELECT number, MIN(category), MIN(source), MIN(page) FROM cards WHERE category=? GROUP BY number"
+        }
+        val cursor = readableDatabase.rawQuery(sql, if (category.isNullOrBlank()) emptyArray() else arrayOf(category))
+        val all = mutableListOf<CardRecord>()
+        cursor.use {
+            while (it.moveToNext()) all.add(CardRecord(it.getString(0), it.getString(1), it.getString(2), it.getInt(3)))
+        }
+        fun matches(number: String, start: String, end: String) =
+            number.startsWith(start) && number.endsWith(end) && number.length >= start.length + end.length
+        return all.filter { matches(it.number, a, b) || matches(it.number, b, a) }
+            .distinctBy { it.number }
+            .sortedWith(compareBy<CardRecord> {
+                when {
+                    it.number.startsWith(a) && it.number.endsWith(b) -> 0
+                    else -> 1
+                }
+            }.thenBy { it.number })
+            .take(100)
+    }
+
+'''
+    if anchor not in k: raise SystemExit("Could not find database countCategory insertion point")
+    k = k.replace(anchor, method + anchor, 1)
+
+# Replace manual search handler so it does not strip the dots before matching.
+a = k.index("    private fun searchCards() {")
+b = k.index("    private fun displayMatches(", a)
+handler = '''    private fun searchCards() {
+        val raw = normalizeDigits(searchBox.text.toString()).trim()
+        results.removeAllViews()
+        val categoryValue = categories.getOrNull(
+            if (::searchCategory.isInitialized) searchCategory.selectedItemPosition
+            else category.selectedItemPosition
+        )
+        val pieces = raw.split(Regex("\\\\.\\\\.{1,}|…|\\\\s*/\\\\s*"))
+            .map { it.filter { ch -> ch in '0'..'9' } }
+            .filter { it.isNotEmpty() }
+
+        val matches = if (pieces.size >= 2 && pieces[0].length >= 2 && pieces[1].length >= 2) {
+            db.searchByEnds(pieces[0], pieces[1], categoryValue)
+        } else {
+            val digits = raw.filter { it in '0'..'9' }
+            if (digits.length < 3) {
+                showStatus("اكتب 3 أرقام على الأقل، أو اكتب بداية الكرت ونهايته وبينهما ثلاث نقاط، مثل 65897...240.")
+                searchBox.requestFocus()
+                return
+            }
+            db.search(digits, categoryValue)
+        }
+
+        if (matches.isEmpty()) {
+            showStatus("لم أعثر على كرت يطابق بداية الرقم ونهايته في فئة $categoryValue. تأكد من ترتيب الأرقام أو جرّب الفئة الصحيحة.")
+            results.addView(TextView(this).apply {
+                text = "لا توجد نتائج مطابقة. مثال: 65897...240 (بداية الكرت ... نهايته)\\nيمكن أيضاً كتابة 240...65897؛ التطبيق يجرب الاتجاهين."
+                textSize = 15f
+                setTextColor(0xFFFFC857.toInt())
+                setPadding(12, 12, 12, 12)
+                gravity = Gravity.RIGHT
+            })
+            return
+        }
+        displayMatches(matches, pieces.joinToString("..."))
+        showStatus("تم العثور على " + matches.size + " كرت مطابق لبداية الرقم ونهايته في فئة $categoryValue.")
+        var parent: android.view.ViewParent? = results.parent
+        while (parent != null && parent !is ScrollView) parent = parent.parent
+        (parent as? ScrollView)?.post { (parent as? ScrollView)?.smoothScrollTo(0, results.top) }
+    }
+
+'''
+k = k[:a] + handler + k[b:]
+main.write_text(k)
+print("Added strict prefix/suffix matching for dotted card numbers and RTL-reversed visual order.")
