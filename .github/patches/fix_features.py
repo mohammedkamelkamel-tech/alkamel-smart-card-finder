@@ -392,3 +392,109 @@ if 'fun countCategory(category: String)' not in s:
 ''' + needle)
 p.write_text(s)
 print("Applied native dark preview-matching dashboard.")
+
+
+# Correct card inventory accounting and partial-number search.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+old_db = '''    fun insertMany(numbers: List<String>, category: String, source: String, page: Int): Int {
+        val db = writableDatabase
+        var added = 0
+        db.beginTransaction()
+        try {
+            numbers.distinct().forEach { number ->
+                if (number.length in 7..15 && number.all { it.isDigit() }) {
+                    val values = ContentValues().apply {
+                        put("number", number); put("category", category)
+                        put("source", source); put("page", page)
+                    }
+                    if (db.insertWithOnConflict("cards", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE) != -1L)
+                        added++
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+        return added
+    }
+
+    fun search(query: String): List<CardRecord> {
+        val cursor = readableDatabase.rawQuery(
+            "SELECT number, category, source, page FROM cards WHERE number LIKE ? ORDER BY CASE WHEN number=? THEN 0 ELSE 1 END, number LIMIT 200",
+            arrayOf("%$query%", query)
+        )
+        val out = mutableListOf<CardRecord>()
+        cursor.use {
+            while (it.moveToNext()) out.add(CardRecord(it.getString(0), it.getString(1), it.getString(2), it.getInt(3)))
+        }
+        return out
+    }
+
+    fun count(): Int {
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM cards", null).use {
+            return if (it.moveToFirst()) it.getInt(0) else 0
+        }
+    }
+'''
+new_db = '''    fun insertMany(numbers: List<String>, category: String, source: String, page: Int): Int {
+        val db = writableDatabase
+        var added = 0
+        db.beginTransaction()
+        try {
+            // A card number is globally unique, even when repeated on another PDF page/file.
+            numbers.asSequence().map { it.trim() }.distinct().forEach { number ->
+                if (number.length == 11 && number.all { it in '0'..'9' }) {
+                    val exists = db.rawQuery("SELECT 1 FROM cards WHERE number=? LIMIT 1", arrayOf(number)).use { it.moveToFirst() }
+                    if (!exists) {
+                        val values = ContentValues().apply {
+                            put("number", number); put("category", category)
+                            put("source", source); put("page", page)
+                        }
+                        if (db.insertWithOnConflict("cards", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE) != -1L) added++
+                    }
+                }
+            }
+            db.setTransactionSuccessful()
+        } finally { db.endTransaction() }
+        return added
+    }
+
+    fun search(query: String): List<CardRecord> {
+        val q = query.filter { it in '0'..'9' }
+        if (q.length < 3) return emptyList()
+        // Wildcards between digits allow missing digits anywhere while preserving their order.
+        val pattern = "%" + q.toCharArray().joinToString("%") + "%"
+        val cursor = readableDatabase.rawQuery(
+            "SELECT number, MIN(category), MIN(source), MIN(page) FROM cards WHERE number LIKE ? GROUP BY number LIMIT 2000",
+            arrayOf(pattern)
+        )
+        val out = mutableListOf<CardRecord>()
+        cursor.use { while (it.moveToNext()) out.add(CardRecord(it.getString(0), it.getString(1), it.getString(2), it.getInt(3))) }
+        fun skipped(number: String): Int {
+            var pos = 0
+            for (digit in q) {
+                val at = number.indexOf(digit, pos)
+                if (at < 0) return Int.MAX_VALUE
+                pos = at + 1
+            }
+            return number.length - q.length
+        }
+        return out.sortedWith(
+            compareBy<CardRecord> { if (it.number == q) 0 else 1 }
+                .thenBy { if (it.number.contains(q)) 0 else 1 }
+                .thenBy { skipped(it.number) }
+                .thenBy { it.number }
+        ).take(200)
+    }
+
+    fun count(): Int {
+        readableDatabase.rawQuery("SELECT COUNT(DISTINCT number) FROM cards", null).use {
+            return if (it.moveToFirst()) it.getInt(0) else 0
+        }
+    }
+'''
+if old_db not in k:
+    raise SystemExit("Expected CardDb methods were not found; refusing to patch an unknown project version.")
+k = k.replace(old_db, new_db)
+k = k.replace("SELECT COUNT(*) FROM cards WHERE category=?", "SELECT COUNT(DISTINCT number) FROM cards WHERE category=?")
+main.write_text(k)
+print("Applied unique-card counting and ordered partial-number search.")
