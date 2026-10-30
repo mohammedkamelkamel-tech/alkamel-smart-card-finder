@@ -896,3 +896,91 @@ if "searchBox.setOnEditorActionListener" not in k:
 
 main.write_text(k)
 print("Added visible manual search input, clear category pickers, selectable category cards, and synchronized search/import category.")
+
+
+# Final search/import correction: dot masks represent unknown single digit positions.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+
+# Preserve dots in the user query instead of stripping them as non-digits.
+k = k.replace(
+'''        val raw = normalizeDigits(searchBox.text.toString())
+        val q = raw.filter { it in '0'..'9' }''',
+'''        val raw = normalizeDigits(searchBox.text.toString())
+        val q = raw.filter { it in '0'..'9' || it == '.' }'''
+)
+k = k.replace(
+'''        if (q.length < 3) {
+            showStatus("اكتب رقم الكرت أو 3 أرقام على الأقل في مربع «أدخل الرقم أو الأرقام الظاهرة» ثم اضغط بحث.")''',
+'''        if (q.count { it in '0'..'9' } < 3) {
+            showStatus("اكتب أرقام الكرت، واستبدل كل خانة غير واضحة بنقطة (.) ثم اضغط بحث.")'''
+)
+
+# Replace the DB matcher with positional wildcard matching for 11-digit masks.
+a = k.index("    fun search(query: String, category: String? = null): List<CardRecord> {")
+b = k.index("    fun countCategory(category: String): Int {", a)
+search_impl = '''    fun search(query: String, category: String? = null): List<CardRecord> {
+        val mask = query.filter { it in '0'..'9' || it == '.' }
+        val digitCount = mask.count { it in '0'..'9' }
+        if (digitCount < 3) return emptyList()
+        val sql = if (category.isNullOrBlank()) {
+            "SELECT number, MIN(category), MIN(source), MIN(page) FROM cards GROUP BY number LIMIT 20000"
+        } else {
+            "SELECT number, MIN(category), MIN(source), MIN(page) FROM cards WHERE category=? GROUP BY number LIMIT 20000"
+        }
+        val args = if (category.isNullOrBlank()) emptyArray() else arrayOf(category)
+        val cursor = readableDatabase.rawQuery(sql, args)
+        val all = mutableListOf<CardRecord>()
+        cursor.use { while (it.moveToNext()) all.add(CardRecord(it.getString(0), it.getString(1), it.getString(2), it.getInt(3))) }
+
+        fun positionalMatch(number: String, pattern: String): Boolean {
+            if (number.length != pattern.length) return false
+            return pattern.indices.all { i -> pattern[i] == '.' || pattern[i] == number[i] }
+        }
+        fun subsequence(number: String, needle: String): Boolean {
+            var at = 0
+            for (digit in needle.filter { it in '0'..'9' }) {
+                at = number.indexOf(digit, at)
+                if (at < 0) return false
+                at++
+            }
+            return true
+        }
+
+        val hasDots = mask.contains('.')
+        val matches = if (hasDots) {
+            all.filter { positionalMatch(it.number, mask) || positionalMatch(it.number, mask.reversed()) }
+        } else {
+            val needle = mask
+            all.filter { subsequence(it.number, needle) }
+                .sortedWith(compareBy<CardRecord> {
+                    when {
+                        it.number == needle -> 0
+                        it.number.startsWith(needle) -> 1
+                        it.number.endsWith(needle) -> 2
+                        it.number.contains(needle) -> 3
+                        else -> 4
+                    }
+                }.thenBy { it.number.length - digitCount }.thenBy { it.number })
+        }
+        return matches.distinctBy { it.number }.take(200)
+    }
+
+'''
+k = k[:a] + search_impl + k[b:]
+
+# Make the typed search always use the dedicated search category selector if present.
+k = k.replace(
+    "val matches = db.search(q, categories.getOrNull(category.selectedItemPosition))",
+    "val matches = db.search(q, categories.getOrNull(if (::searchCategory.isInitialized) searchCategory.selectedItemPosition else category.selectedItemPosition))"
+)
+
+# OCR: merge all preprocessing passes rather than discarding all but one pass.
+# The PDF/image regex then sees candidates from each pass, reducing missed cards.
+k = k.replace(
+'''        return attempts.maxByOrNull { Regex("\\\\d{7,15}").findAll(normalizeDigits(it)).count() }.orEmpty()''',
+'''        return attempts.joinToString("\\\\n")'''
+)
+
+main.write_text(k)
+print("Applied exact dot-mask search and merged OCR passes for improved PDF extraction.")
