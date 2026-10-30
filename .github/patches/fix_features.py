@@ -471,3 +471,96 @@ print("Applied unique-card counting and ordered partial-number search.")
 k = k.replace("SELECT COUNT(*) FROM cards WHERE category=?", "SELECT COUNT(DISTINCT number) FROM cards WHERE category=?")
 main.write_text(k)
 print("Applied unique-card counting and ordered partial-number search.")
+
+
+# Make the search workflow explicit and validate the selected denomination against the file name.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+
+a = k.index("    private fun searchCards() {")
+b = k.index("    private fun displayMatches(", a)
+k = k[:a] + '''    private fun searchCards() {
+        val raw = normalizeDigits(searchBox.text.toString())
+        val q = raw.filter { it in '0'..'9' }
+        results.removeAllViews()
+        if (q.length < 3) {
+            showStatus("اكتب رقم الكرت أو 3 أرقام على الأقل في مربع «أدخل الرقم أو الأرقام الظاهرة» ثم اضغط بحث.")
+            searchBox.requestFocus()
+            return
+        }
+        val matches = db.search(q)
+        displayMatches(matches, q)
+        if (matches.isNotEmpty()) {
+            var parent: android.view.ViewParent? = results.parent
+            while (parent != null && parent !is ScrollView) parent = parent.parent
+            val scroll = parent as? ScrollView
+            scroll?.post { scroll.smoothScrollTo(0, results.top) }
+        }
+    }
+
+''' + k[b:]
+
+k = k.replace(
+'''        root.addView(actionButton("ابحث في جميع الكروت") { searchCards() })''',
+'''        searchBox.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH ||
+                actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+                searchCards(); true
+            } else false
+        }
+        root.addView(actionButton("بحث عن رقم الكرت  🔎") { searchCards() })'''
+)
+
+a = k.index("    private fun importDocument(uri: Uri) {")
+b = k.index("    private fun queryName(uri: Uri): String {", a)
+k = k[:a] + '''    private fun importDocument(uri: Uri) {
+        val selectedCategory = categories.getOrNull(category.selectedItemPosition)
+            ?: run { showStatus("حدد فئة الكروت أولاً."); return }
+        val name = queryName(uri)
+        val digitsInName = normalizeDigits(name)
+        val detected = Regex("(?<!\\\\d)(100|200|250|500)(?!\\\\d)")
+            .find(digitsInName)?.groupValues?.getOrNull(1)
+        val selectedDigits = selectedCategory.filter { it in '0'..'9' }
+        if (detected != null && detected != selectedDigits) {
+            AlertDialog.Builder(this)
+                .setTitle("الفئة لا تطابق الملف")
+                .setMessage("اسم الملف: $name\\\\nالفئة المكتشفة من اسم الملف: $detected ريال\\\\nالفئة التي اخترتها: $selectedCategory\\\\nتم إلغاء الاستيراد حتى لا تُحفظ الكروت في فئة خاطئة. اختر الفئة الصحيحة أو الملف الصحيح.")
+                .setPositiveButton("حسناً", null).show()
+            showStatus("تم رفض الملف: فئته لا تطابق الفئة المحددة.")
+            return
+        }
+        val proceed = {
+            lifecycleScope.launch {
+                showStatus("جارٍ استيراد $name إلى فئة $selectedCategory...")
+                try {
+                    val added = withContext(Dispatchers.IO) {
+                        when {
+                            name.lowercase(Locale.ROOT).endsWith(".pdf") ||
+                                contentResolver.getType(uri) == "application/pdf" -> readPdfNumbers(uri, selectedCategory, name)
+                            else -> readTextNumbers(uri, selectedCategory, name)
+                        }
+                    }
+                    showStatus("اكتمل الاستيراد: أضيف $added كرت جديد إلى فئة $selectedCategory")
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("اكتمل الاستيراد")
+                        .setMessage("الملف: $name\\\\nالفئة: $selectedCategory\\\\nالكروت الجديدة: $added")
+                        .setPositiveButton("حسناً", null).show()
+                    refreshStats()
+                } catch (e: Exception) {
+                    showStatus("تعذر استيراد الملف $name: \${e.localizedMessage}")
+                }
+            }
+        }
+        if (detected == null) {
+            AlertDialog.Builder(this)
+                .setTitle("تأكيد فئة الملف")
+                .setMessage("لم أتمكن من معرفة الفئة من اسم الملف. هل تريد استيراد «$name» ضمن الفئة المحددة: $selectedCategory؟")
+                .setNegativeButton("إلغاء", null)
+                .setPositiveButton("تأكيد الاستيراد") { _, _ -> proceed() }
+                .show()
+        } else proceed()
+    }
+
+''' + k[b:]
+main.write_text(k)
+print("Patched search feedback, keyboard search, and denomination/file validation.")
