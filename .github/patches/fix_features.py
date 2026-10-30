@@ -1795,3 +1795,15 @@ if missing:
     k = k.replace(anchor, "".join(missing) + anchor, 1)
     main.write_text(k)
 print("Final OCR helper validation/insertion completed: " + str(len(missing)) + " helper(s) restored.")
+
+
+# PDFBox Android treats JPEG2000 decoding as an optional provider. The app does
+# not bundle that optional Gemalto decoder; suppress only this optional warning
+# so R8 can shrink the APK while normal PDF/TXT card extraction remains intact.
+rules = Path("app/proguard-rules.pro")
+current_rules = rules.read_text() if rules.exists() else ""
+optional_rule = "-dontwarn com.gemalto.jp2.**"
+if optional_rule not in current_rules:
+    rules.parent.mkdir(parents=True, exist_ok=True)
+    rules.write_text(current_rules.rstrip() + "\n" + optional_rule + "\n")
+print("Configured R8 for PDFBox's optional JPEG2000 decoder.")
