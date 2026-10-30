@@ -1296,3 +1296,143 @@ k = k.replace(
 )
 main.write_text(k)
 print("Fixed PDF progress label interpolation.")
+
+
+# OCR must use the same card-database search engine as typed queries.
+# Search the selected category first, then all categories as a fallback so a wrong
+# category selection cannot hide an otherwise valid match from the photographed card.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+a = k.index("    private fun readImage(uri: Uri) {")
+b = k.index("    private suspend fun recognize(image: InputImage): Text =", a)
+ocr_search = '''    private fun readImage(uri: Uri) {
+        lifecycleScope.launch {
+            showStatus("جارٍ قراءة الرقم من الصورة ثم البحث عنه في قاعدة الكروت...")
+            results.removeAllViews()
+            try {
+                val bitmap = withContext(Dispatchers.IO) {
+                    contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it) }
+                        ?: throw IllegalStateException("تعذر فتح الصورة المختارة")
+                }
+                val attempts = recognizeAttempts(bitmap)
+                bitmap.recycle()
+
+                val fragments = attempts.flatMap { text ->
+                    normalizeDigits(text).split(Regex("[^0-9]+"))
+                        .map { it.filter { ch -> ch in '0'..'9' } }
+                        .filter { it.length >= 3 }
+                }.distinct().sortedWith(compareByDescending<String> { it.length }.thenBy { it })
+
+                data class OcrMatch(val record: CardRecord, val sourceDigits: String)
+                val found = linkedMapOf<String, OcrMatch>()
+                val selectedCategory = categories.getOrNull(category.selectedItemPosition)
+
+                // First, search every OCR fragment using exactly the same DB matcher as typed search.
+                // The selected category is preferred, then the complete inventory is checked.
+                for (fragment in fragments) {
+                    if (fragment.length > 11) continue
+                    db.search(fragment, selectedCategory).forEach { record ->
+                        found.putIfAbsent(record.number, OcrMatch(record, fragment))
+                    }
+                }
+                if (found.isEmpty()) {
+                    for (fragment in fragments) {
+                        if (fragment.length > 11) continue
+                        db.search(fragment).forEach { record ->
+                            found.putIfAbsent(record.number, OcrMatch(record, fragment))
+                        }
+                    }
+                }
+
+                // If OCR split a card number into two visible groups, join them in reading order
+                // and run the same subsequence search against the database.
+                for (firstIndex in fragments.indices) {
+                    for (secondIndex in fragments.indices) {
+                        if (firstIndex == secondIndex) continue
+                        val first = fragments[firstIndex]
+                        val second = fragments[secondIndex]
+                        if (first.length < 3 || second.length < 3 || first.length + second.length > 11) continue
+                        val joined = first + second
+                        val primary = db.search(joined, selectedCategory)
+                        val matches = if (primary.isNotEmpty()) primary else db.search(joined)
+                        matches.forEach { record ->
+                            val firstAt = record.number.indexOf(first)
+                            val secondAt = if (firstAt >= 0) record.number.indexOf(second, firstAt + first.length) else -1
+                            if (firstAt >= 0 && secondAt >= firstAt + first.length) {
+                                found.putIfAbsent(record.number, OcrMatch(record, joined))
+                            }
+                        }
+                    }
+                }
+
+                // A full 11-digit OCR read is an exact lookup too.
+                fragments.filter { it.length == 11 }.forEach { number ->
+                    db.search(number).forEach { record -> found.putIfAbsent(record.number, OcrMatch(record, number)) }
+                }
+
+                if (found.isEmpty()) {
+                    showStatus("قرأت أرقاماً من الصورة، لكن لم أجد لها كرتاً مطابقاً في المخزون. تأكد من استيراد ملف الفئة الصحيحة.")
+                    results.addView(TextView(this@MainActivity).apply {
+                        text = "الأرقام التي قرأتها الكاميرا: " + fragments.joinToString("  |  ").ifBlank { "لم يتم التعرف على أرقام" } +
+                            "\\\\n\\\\nجرّب تحسين وضوح الصورة أو اختر فئة الكرت الصحيحة ثم أعد المحاولة."
+                        textSize = 15f
+                        setTextColor(0xFFFFFFFF.toInt())
+                        setPadding(12, 12, 12, 12)
+                    })
+                } else {
+                    val sorted = found.values.sortedWith(
+                        compareBy<OcrMatch> { if (it.record.category == selectedCategory) 0 else 1 }
+                            .thenBy { it.record.number }
+                    )
+                    showStatus("بحث الصورة اكتمل: عثرت على " + sorted.size + " كرت مطابق.")
+                    sorted.take(100).forEachIndexed { index, match ->
+                        val card = LinearLayout(this@MainActivity).apply {
+                            orientation = LinearLayout.VERTICAL
+                            setPadding(14, 12, 14, 12)
+                            background = android.graphics.drawable.GradientDrawable().apply {
+                                setColor(0xFF111A2E.toInt())
+                                setStroke(2, 0xFF20B981.toInt())
+                                cornerRadius = 18f
+                            }
+                        }
+                        card.addView(TextView(this@MainActivity).apply {
+                            text = "نتيجة مطابقة رقم " + (index + 1)
+                            textSize = 13f; setTextColor(0xFFFFB300.toInt())
+                        })
+                        card.addView(TextView(this@MainActivity).apply {
+                            text = "الرقم المقروء من الصورة: " + match.sourceDigits
+                            textSize = 15f; setTextColor(0xFFCAD3E2.toInt())
+                        })
+                        card.addView(TextView(this@MainActivity).apply {
+                            text = "رقم الكرت الكامل: " + match.record.number
+                            textSize = 22f; typeface = android.graphics.Typeface.DEFAULT_BOLD
+                            setTextColor(0xFFFFFFFF.toInt())
+                        })
+                        card.addView(TextView(this@MainActivity).apply {
+                            text = "الفئة: " + match.record.category
+                            textSize = 14f; setTextColor(0xFF20C7E8.toInt())
+                        })
+                        results.addView(card)
+                    }
+                }
+            } catch (e: Exception) {
+                showStatus("تعذرت قراءة الصورة والبحث عنها: \${e.localizedMessage}")
+            }
+        }
+    }
+
+    private suspend fun recognizeAttempts(bitmap: Bitmap): List<String> {
+        val attempts = mutableListOf<String>()
+        attempts.add(recognize(InputImage.fromBitmap(bitmap, 0)).text)
+        for (threshold in listOf(false, true)) {
+            val processed = enhanceForDarkDigits(bitmap, threshold)
+            try { attempts.add(recognize(InputImage.fromBitmap(processed, 0)).text) }
+            finally { processed.recycle() }
+        }
+        return attempts
+    }
+
+'''
+k = k[:a] + ocr_search + k[b:]
+main.write_text(k)
+print("Unified camera/gallery OCR results with the typed database search and all-category fallback.")
