@@ -400,44 +400,6 @@ main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
 k = main.read_text()
 # Remove the count helper inserted earlier so the database block can be replaced atomically.
 k = re.sub(r"\n    fun countCategory\(category: String\): Int \{.*?\n    \}\n", "\n", k, flags=re.S)
-old_db = '''    fun insertMany(numbers: List<String>, category: String, source: String, page: Int): Int {
-        val db = writableDatabase
-        var added = 0
-        db.beginTransaction()
-        try {
-            numbers.distinct().forEach { number ->
-                if (number.length in 7..15 && number.all { it.isDigit() }) {
-                    val values = ContentValues().apply {
-                        put("number", number); put("category", category)
-                        put("source", source); put("page", page)
-                    }
-                    if (db.insertWithOnConflict("cards", null, values, android.database.sqlite.SQLiteDatabase.CONFLICT_IGNORE) != -1L)
-                        added++
-                }
-            }
-            db.setTransactionSuccessful()
-        } finally { db.endTransaction() }
-        return added
-    }
-
-    fun search(query: String): List<CardRecord> {
-        val cursor = readableDatabase.rawQuery(
-            "SELECT number, category, source, page FROM cards WHERE number LIKE ? ORDER BY CASE WHEN number=? THEN 0 ELSE 1 END, number LIMIT 200",
-            arrayOf("%$query%", query)
-        )
-        val out = mutableListOf<CardRecord>()
-        cursor.use {
-            while (it.moveToNext()) out.add(CardRecord(it.getString(0), it.getString(1), it.getString(2), it.getInt(3)))
-        }
-        return out
-    }
-
-    fun count(): Int {
-        readableDatabase.rawQuery("SELECT COUNT(*) FROM cards", null).use {
-            return if (it.moveToFirst()) it.getInt(0) else 0
-        }
-    }
-'''
 new_db = '''    fun insertMany(numbers: List<String>, category: String, source: String, page: Int): Int {
         val db = writableDatabase
         var added = 0
@@ -464,7 +426,6 @@ new_db = '''    fun insertMany(numbers: List<String>, category: String, source: 
     fun search(query: String): List<CardRecord> {
         val q = query.filter { it in '0'..'9' }
         if (q.length < 3) return emptyList()
-        // Wildcards between digits allow missing digits anywhere while preserving their order.
         val pattern = "%" + q.toCharArray().joinToString("%") + "%"
         val cursor = readableDatabase.rawQuery(
             "SELECT number, MIN(category), MIN(source), MIN(page) FROM cards WHERE number LIKE ? GROUP BY number LIMIT 2000",
@@ -481,12 +442,10 @@ new_db = '''    fun insertMany(numbers: List<String>, category: String, source: 
             }
             return number.length - q.length
         }
-        return out.sortedWith(
-            compareBy<CardRecord> { if (it.number == q) 0 else 1 }
-                .thenBy { if (it.number.contains(q)) 0 else 1 }
-                .thenBy { skipped(it.number) }
-                .thenBy { it.number }
-        ).take(200)
+        return out.sortedWith(compareBy<CardRecord> { if (it.number == q) 0 else 1 }
+            .thenBy { if (it.number.contains(q)) 0 else 1 }
+            .thenBy { skipped(it.number) }
+            .thenBy { it.number }).take(200)
     }
 
     fun countCategory(category: String): Int {
@@ -501,9 +460,14 @@ new_db = '''    fun insertMany(numbers: List<String>, category: String, source: 
         }
     }
 '''
-if old_db not in k:
-    raise SystemExit("Expected CardDb methods were not found; refusing to patch an unknown project version.")
-k = k.replace(old_db, new_db)
+# Replace the CardDb methods from insertMany through the end of CardDb.
+db_start = k.index("    fun insertMany(")
+db_end = k.rfind("\n}")
+if db_start < 0 or db_end < db_start:
+    raise SystemExit("CardDb section not found; refusing to patch.")
+k = k[:db_start] + new_db + k[db_end:]
+main.write_text(k)
+print("Applied unique-card counting and ordered partial-number search.")
 k = k.replace("SELECT COUNT(*) FROM cards WHERE category=?", "SELECT COUNT(DISTINCT number) FROM cards WHERE category=?")
 main.write_text(k)
 print("Applied unique-card counting and ordered partial-number search.")
