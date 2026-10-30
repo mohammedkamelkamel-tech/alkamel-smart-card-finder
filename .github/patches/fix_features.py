@@ -2125,7 +2125,7 @@ new_header = '''        val brand = LinearLayout(this).apply {
         val brandLogo = android.widget.ImageView(this).apply {
             setImageResource(R.mipmap.ic_launcher)
             scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
-            layoutParams = LinearLayout.LayoutParams(88, 88).apply {
+            layoutParams = LinearLayout.LayoutParams(150, 150).apply {
                 gravity = Gravity.CENTER
                 bottomMargin = 6
             }
