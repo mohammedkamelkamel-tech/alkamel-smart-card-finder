@@ -192,3 +192,203 @@ s = s.replace('''            max = 100; progress = 0; visibility = View.GONE
 
 p.write_text(s)
 print("Applied OCR, image-picker, and import-progress updates.")
+
+
+# Native dark navy/gold dashboard, aligned with the Google AI Studio preview.
+a = s.index('    private fun buildScreen() {')
+b = s.index('    private fun label(text: String)', a)
+new_screen = r'''    private fun buildScreen() {
+        val navy = 0xFF070C20.toInt()
+        val panel = 0xFF111A2E.toInt()
+        val gold = 0xFFFFB300.toInt()
+        val muted = 0xFF9AA8C0.toInt()
+        val cyan = 0xFF20C7E8.toInt()
+        val green = 0xFF13B981.toInt()
+        val purple = 0xFF9B5DE5.toInt()
+        val blue = 0xFF4385F5.toInt()
+        fun bg(color: Int, stroke: Int = 0xFF273650.toInt(), radius: Float = 22f) =
+            android.graphics.drawable.GradientDrawable().apply { setColor(color); setStroke(1, stroke); cornerRadius = radius }
+        fun txt(value: String, size: Float, color: Int, bold: Boolean = false) =
+            TextView(this).apply {
+                text = value; textSize = size; setTextColor(color); gravity = Gravity.RIGHT
+                if (bold) typeface = android.graphics.Typeface.DEFAULT_BOLD
+                setPadding(2, 5, 2, 5)
+            }
+        fun lp() = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 7, 0, 7) }
+        fun panelBox(color: Int = panel) = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(16, 14, 16, 14); background = bg(color); layoutParams = lp()
+        }
+        fun action(caption: String, color: Int, callback: () -> Unit) = Button(this).apply {
+            text = caption; isAllCaps = false; textSize = 14f; setTextColor(0xFFFFFFFF.toInt())
+            typeface = android.graphics.Typeface.DEFAULT_BOLD; background = bg(color, color, 18f)
+            setPadding(12, 8, 12, 8); layoutParams = lp(); setOnClickListener { callback() }
+        }
+
+        val outer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; layoutDirection = View.LAYOUT_DIRECTION_RTL; setBackgroundColor(navy)
+        }
+        val scroll = ScrollView(this)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(16, 14, 16, 20); layoutDirection = View.LAYOUT_DIRECTION_RTL
+        }
+        scroll.addView(content)
+        outer.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(8, 10, 8, 10); background = bg(0xFF10192D.toInt(), 0xFF263650.toInt(), 0f)
+        }
+        header.addView(TextView(this).apply {
+            text = "▣"; textSize = 30f; gravity = Gravity.CENTER; setTextColor(navy)
+            background = bg(0xFFFF9800.toInt(), 0xFFFF9800.toInt(), 18f)
+            layoutParams = LinearLayout.LayoutParams(58, 58).apply { setMargins(4, 0, 10, 0) }
+        })
+        val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        brand.addView(txt("الكامل", 22f, 0xFFFFFFFF.toInt(), true))
+        brand.addView(txt("الباحث الذكي", 13f, gold, true))
+        brand.addView(txt("com.alkamel.cardfinder", 11f, muted))
+        header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(TextView(this).apply {
+            text = "🛡 " + db.count(); textSize = 16f; gravity = Gravity.CENTER
+            setTextColor(gold); background = bg(0xFF20283A.toInt()); setPadding(12, 12, 12, 12)
+        })
+        content.addView(header, lp())
+
+        val hero = panelBox(0xFF202B3E.toInt())
+        hero.addView(txt("✧  محرك بحث ذكي للأرقام المفقودة والتالفة", 14f, gold, true).apply {
+            gravity = Gravity.CENTER; background = bg(0xFF302A27.toInt(), 0xFF72521B.toInt(), 28f); setPadding(10, 9, 10, 9)
+        }, lp())
+        hero.addView(txt("الكامل – الباحث الذكي عن الكروت", 27f, 0xFFFFFFFF.toInt(), true))
+        hero.addView(txt("استعادة أرقام كروت الشحن من الصور والملفات حتى لو فُقد جزء منها أو كانت مشوهة بسبب الكشط أو رداءة التصوير.", 16f, 0xFFCAD3E2.toInt()))
+        val stats = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background = bg(0xFF090F22.toInt()); setPadding(14, 12, 14, 12)
+        }
+        val stat = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        stat.addView(txt("إجمالي الكروت المخزنة", 13f, muted))
+        stat.addView(txt(db.count().toString() + " كرت", 27f, 0xFFFFFFFF.toInt(), true))
+        stats.addView(stat, LinearLayout.LayoutParams(0, -2, 1f))
+        stats.addView(TextView(this).apply {
+            text = "♢"; textSize = 30f; gravity = Gravity.CENTER; setTextColor(gold)
+            background = bg(0xFF282522.toInt(), 0xFF73521A.toInt()); layoutParams = LinearLayout.LayoutParams(62, 62)
+        })
+        hero.addView(stats, lp())
+        hero.addView(txt("البحث عن رقم الكرت", 18f, 0xFFFFFFFF.toInt(), true))
+        val searchRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            background = bg(0xFF080E21.toInt(), 0xFF35445E.toInt()); setPadding(8, 5, 8, 5)
+        }
+        searchBox = EditText(this).apply {
+            hint = "أدخل الرقم أو الأرقام الظاهرة"; textSize = 17f; setSingleLine(true)
+            setTextColor(0xFFFFFFFF.toInt()); setHintTextColor(0xFF71809A.toInt())
+            layoutDirection = View.LAYOUT_DIRECTION_LTR; gravity = Gravity.CENTER
+            setPadding(7, 8, 7, 8); background = null
+        }
+        searchRow.addView(searchBox, LinearLayout.LayoutParams(0, -2, 1f))
+        searchRow.addView(action("بحث  ←", 0xFFFF9800.toInt()) { searchCards() })
+        hero.addView(searchRow, lp())
+        hero.addView(txt("أمثلة سريعة: 366365467 (تسلسل جزئي)   •   984*120 (بداية ونهاية)", 12f, muted))
+        content.addView(hero, lp())
+
+        content.addView(txt("فئات الكروت المعتمدة", 21f, 0xFFFFFFFF.toInt(), true))
+        val grid = android.widget.GridLayout(this).apply { columnCount = 2; layoutDirection = View.LAYOUT_DIRECTION_RTL }
+        val colors = listOf(green, blue, gold, purple)
+        categories.forEachIndexed { index, cat ->
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL; setPadding(13, 13, 13, 13)
+                background = bg(0xFF101A2E.toInt(), colors[index])
+            }
+            card.addView(txt(cat, 17f, colors[index], true))
+            card.addView(txt(db.countCategory(cat).toString() + " كرت مخزن", 14f, 0xFFD4DCEC.toInt()))
+            val gp = android.widget.GridLayout.LayoutParams().apply {
+                width = 0; height = -2; columnSpec = android.widget.GridLayout.spec(index % 2, 1f)
+                rowSpec = android.widget.GridLayout.spec(index / 2); setMargins(5, 5, 5, 5)
+            }
+            grid.addView(card, gp)
+        }
+        content.addView(grid, lp())
+
+        content.addView(txt("الوظائف والخدمات الرئيسية", 21f, 0xFFFFFFFF.toInt(), true))
+        val services = listOf(
+            Triple("البحث عن كرت", "البحث بالرقم الكامل أو البداية أو النهاية أو تسلسل مفقود", gold),
+            Triple("التصوير والبحث (OCR)", "التقاط صورة الكرت بالكاميرا أو اختيار صورة والتعرف البصري دون إنترنت", cyan),
+            Triple("استيراد ملفات TXT و PDF", "استيراد ملفات متعددة وتحديد الفئة واستخراج أرقام الكروت", green),
+            Triple("قاعدة بيانات الكروت", "استعراض وإدارة الكروت المخزنة وتفاصيل مصدرها", blue)
+        )
+        services.forEachIndexed { index, item ->
+            val service = panelBox(0xFF10192C.toInt())
+            service.addView(txt(item.first, 18f, 0xFFFFFFFF.toInt(), true))
+            service.addView(txt(item.second, 14f, muted))
+            service.setOnClickListener {
+                when (index) {
+                    0 -> searchBox.requestFocus()
+                    1 -> openCamera()
+                    2 -> openFile.launch(arrayOf("text/plain", "application/pdf", "application/octet-stream"))
+                    else -> showStatus("إجمالي الكروت: " + db.count())
+                }
+            }
+            content.addView(service)
+        }
+
+        content.addView(txt("استيراد سريع", 20f, 0xFFFFFFFF.toInt(), true))
+        category = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, categories)
+        }
+        content.addView(category, lp())
+        content.addView(action("استيراد ملف TXT أو PDF", green) {
+            openFile.launch(arrayOf("text/plain", "application/pdf", "application/octet-stream"))
+        })
+        content.addView(action("تصوير الكرت بالكاميرا", cyan) { openCamera() })
+        content.addView(action("اختيار صورة من الهاتف", purple) { pickImage.launch(arrayOf("image/*")) })
+        importProgress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100; progress = 0; visibility = View.GONE
+            progressTintList = android.content.res.ColorStateList.valueOf(cyan)
+        }
+        content.addView(importProgress, lp())
+        status = txt("جاهز — إجمالي الكروت: " + db.count(), 14f, cyan).apply { gravity = Gravity.CENTER }
+        content.addView(status, lp())
+        content.addView(txt("النتائج / الأرقام المستخرجة", 20f, 0xFFFFFFFF.toInt(), true))
+        results = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(results, lp())
+        content.addView(action("تحديث إحصائيات المخزون", gold) { refreshStats() })
+        content.addView(txt("قراءة الصور آلية وقد تخطئ في الأرقام المتشابهة. راجع النتائج وأكد الرقم الصحيح قبل استخدامه.", 12f, muted))
+
+        val bottom = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
+            setPadding(4, 8, 4, 8); background = bg(0xFF10192D.toInt(), 0xFF273650.toInt(), 0f)
+        }
+        listOf("الرئيسية", "البحث الذكي", "كاميرا OCR", "الاستيراد", "القاعدة", "المزيد").forEachIndexed { i, name ->
+            val color = when (i) { 2 -> cyan; 0 -> gold; else -> muted }
+            val item = TextView(this).apply {
+                text = when (i) { 0 -> "⌂\\n" + name; 1 -> "⌕\\n" + name; 2 -> "◎\\n" + name; 3 -> "⇧\\n" + name; 4 -> "▤\\n" + name; else -> "☷\\n" + name }
+                textSize = 11f; gravity = Gravity.CENTER; setTextColor(color); setPadding(2, 5, 2, 5)
+            }
+            item.setOnClickListener {
+                when (i) {
+                    0 -> scroll.smoothScrollTo(0, 0)
+                    1 -> { scroll.smoothScrollTo(0, hero.top); searchBox.requestFocus() }
+                    2 -> openCamera()
+                    3 -> openFile.launch(arrayOf("text/plain", "application/pdf", "application/octet-stream"))
+                    4 -> showStatus("إجمالي الكروت: " + db.count())
+                    else -> refreshStats()
+                }
+            }
+            bottom.addView(item, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        outer.addView(bottom, LinearLayout.LayoutParams(-1, -2))
+        setContentView(outer)
+    }
+
+'''
+s = s[:a] + new_screen + s[b:]
+needle = '    fun count(): Int {'
+if 'fun countCategory(category: String)' not in s:
+    s = s.replace(needle, '''    fun countCategory(category: String): Int {
+        readableDatabase.rawQuery("SELECT COUNT(*) FROM cards WHERE category=?", arrayOf(category)).use {
+            return if (it.moveToFirst()) it.getInt(0) else 0
+        }
+    }
+
+''' + needle)
+p.write_text(s)
+print("Applied native dark preview-matching dashboard.")
