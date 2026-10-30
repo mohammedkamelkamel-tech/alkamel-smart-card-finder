@@ -20,6 +20,20 @@ jobs:
           unzip -o alkamel-smart-card-finder-project.zip -d extracted
           cp -R extracted/alkamel-smart-card-finder/. .
 
+      - name: Patch Kotlin compile errors
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+          s = p.read_text()
+          s, n1 = re.subn(r'\bsingleLine\s*=\s*true\b', 'setSingleLine(true)', s)
+          s, n2 = s.replace('takePicture.launch(cameraUri)', 'takePicture.launch(cameraUri ?: return)'), s.count('takePicture.launch(cameraUri)')
+          p.write_text(s)
+          print(f"Fixed singleLine occurrences: {n1}")
+          print(f"Fixed nullable cameraUri launches: {n2}")
+          PY
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
