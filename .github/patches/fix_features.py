@@ -397,6 +397,8 @@ print("Applied native dark preview-matching dashboard.")
 # Correct card inventory accounting and partial-number search.
 main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
 k = main.read_text()
+# Remove the count helper inserted earlier so the database block can be replaced atomically.
+k = re.sub(r"\n    fun countCategory\(category: String\): Int \{.*?\n    \}\n", "\n", k, flags=re.S)
 old_db = '''    fun insertMany(numbers: List<String>, category: String, source: String, page: Int): Int {
         val db = writableDatabase
         var added = 0
@@ -484,6 +486,12 @@ new_db = '''    fun insertMany(numbers: List<String>, category: String, source: 
                 .thenBy { skipped(it.number) }
                 .thenBy { it.number }
         ).take(200)
+    }
+
+    fun countCategory(category: String): Int {
+        readableDatabase.rawQuery("SELECT COUNT(DISTINCT number) FROM cards WHERE category=?", arrayOf(category)).use {
+            return if (it.moveToFirst()) it.getInt(0) else 0
+        }
     }
 
     fun count(): Int {
