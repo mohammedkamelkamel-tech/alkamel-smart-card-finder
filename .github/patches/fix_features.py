@@ -1485,21 +1485,20 @@ print("Restored OCR preprocessing helper functions required by camera/gallery an
 
 
 # Reduce installed APK size without sacrificing offline OCR:
-# - package only ARM ABIs used by Android phones (32-bit and 64-bit)
+# - package ARM 32-bit and 64-bit native libraries only
 # - enable R8 code shrinking and resource shrinking for the debug-signed APK
-# - retain ML Kit's bundled OCR implementation so recognition remains offline.
-from pathlib import Path
-import re
-
+# - retain ML Kit bundled OCR so recognition remains available offline.
 gradle_file = Path("app/build.gradle")
 g = gradle_file.read_text()
 if "abiFilters" not in g:
     g = g.replace(
-        "        versionName \\"1.0.0\\"",
-        "        versionName \\"1.0.0\\"\\n        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }"
+        '''        versionName "1.0.0"''',
+        '''        versionName "1.0.0"
+        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }'''
     )
 if "minifyEnabled true" not in g:
-    marker = "\\n    buildFeatures { buildConfig true }"
+    marker = '''
+    buildFeatures { buildConfig true }'''
     build_types = '''
     buildTypes {
         debug {
@@ -1511,7 +1510,7 @@ if "minifyEnabled true" not in g:
 '''
     if marker not in g:
         raise SystemExit("Cannot find Android buildFeatures insertion point")
-    g = g.replace(marker, "\\n" + build_types + marker, 1)
+    g = g.replace(marker, build_types + marker, 1)
 gradle_file.write_text(g)
 
 rules = Path("app/proguard-rules.pro")
@@ -1521,4 +1520,4 @@ if not rules.exists():
 -keep class com.google.mlkit.vision.text.** { *; }
 -dontwarn com.google.mlkit.**
 """.lstrip())
-print("Enabled R8/resource shrinking and ARM-only native packaging while retaining offline OCR.")
+print("Enabled R8/resource shrinking and ARM-only packaging while retaining offline OCR.")
