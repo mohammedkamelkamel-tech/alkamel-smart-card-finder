@@ -2080,3 +2080,24 @@ k = k.replace('textSize = 14f; setTextColor(0xFFFFB300.toInt())\n               
 
 main.write_text(k)
 print("Applied requested copy, persistent backup folder, search-field, stock summary, and match-indicator improvements.")
+
+
+# Install the user-approved launcher icon in a density-independent resource folder.
+import shutil
+icon_source = Path(".github/assets/ic_launcher.jpg")
+if not icon_source.exists():
+    raise SystemExit("Approved launcher icon asset is missing.")
+icon_dir = Path("app/src/main/res/mipmap-nodpi")
+icon_dir.mkdir(parents=True, exist_ok=True)
+shutil.copyfile(icon_source, icon_dir / "ic_launcher.jpg")
+manifest = Path("app/src/main/AndroidManifest.xml")
+manifest_text = manifest.read_text()
+application_tag = re.search(r"<application\b[^>]*>", manifest_text)
+if not application_tag:
+    raise SystemExit("Android application manifest tag was not found.")
+tag = application_tag.group(0)
+if "android:icon=" not in tag:
+    tag = tag[:-1] + '\n        android:icon="@mipmap/ic_launcher"\n        android:roundIcon="@mipmap/ic_launcher">'
+    manifest_text = manifest_text[:application_tag.start()] + tag + manifest_text[application_tag.end():]
+manifest.write_text(manifest_text)
+print("Installed approved AlKamel launcher icon and manifest references.")
