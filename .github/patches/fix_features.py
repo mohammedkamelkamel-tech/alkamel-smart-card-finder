@@ -668,13 +668,6 @@ k = k[:a] + '''    private fun readImage(uri: Uri) {
     }
 
 ''' + k[b:]
-a = k.index("    private suspend fun recognizeBest(bitmap: Bitmap): String {")
-b = k.index("    private fun enhanceForDarkDigits(", a)
-k = k[:a] + '''    private suspend fun recognizeBest(bitmap: Bitmap): String =
-        recognizeAttempts(bitmap).maxByOrNull {
-            Regex("\\\\\\\\d{7,15}").findAll(normalizeDigits(it)).count()
-        }.orEmpty()
-
-''' + k[b:]
+# Keep the existing recognizeBest helper; OCR image flow uses recognizeAttempts.
 main.write_text(k)
 print("Added OCR fragment recovery and explicit missing-digit/full-number results.")
