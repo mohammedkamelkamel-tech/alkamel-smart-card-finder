@@ -1484,30 +1484,14 @@ main.write_text(k)
 print("Restored OCR preprocessing helper functions required by camera/gallery and PDF OCR.")
 
 
-# Reduce installed APK size without sacrificing offline OCR:
-# - package ARM 32-bit and 64-bit native libraries only
-# - enable R8 code shrinking and resource shrinking for the debug-signed APK
-# - retain ML Kit bundled OCR so recognition remains available offline.
+# Reduce installed APK size while preserving offline OCR.
 gradle_file = Path("app/build.gradle")
 g = gradle_file.read_text()
 if "abiFilters" not in g:
-    g = g.replace(
-        '''        versionName "1.0.0"''',
-        '''        versionName "1.0.0"
-        ndk { abiFilters 'arm64-v8a', 'armeabi-v7a' }'''
-    )
+    g = g.replace('versionName "1.0.0"', 'versionName "1.0.0"\n        ndk { abiFilters \'arm64-v8a\', \'armeabi-v7a\' }')
 if "minifyEnabled true" not in g:
-    marker = '''
-    buildFeatures { buildConfig true }'''
-    build_types = '''
-    buildTypes {
-        debug {
-            minifyEnabled true
-            shrinkResources true
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-        }
-    }
-'''
+    marker = "    buildFeatures { buildConfig true }"
+    build_types = "    buildTypes {\n        debug {\n            minifyEnabled true\n            shrinkResources true\n            proguardFiles getDefaultProguardFile(\'proguard-android-optimize.txt\'), \'proguard-rules.pro\'\n        }\n    }\n"
     if marker not in g:
         raise SystemExit("Cannot find Android buildFeatures insertion point")
     g = g.replace(marker, build_types + marker, 1)
@@ -1515,9 +1499,5 @@ gradle_file.write_text(g)
 
 rules = Path("app/proguard-rules.pro")
 if not rules.exists():
-    rules.write_text("""
-# ML Kit bundled OCR is required for offline card recognition.
--keep class com.google.mlkit.vision.text.** { *; }
--dontwarn com.google.mlkit.**
-""".lstrip())
+    rules.write_text("# ML Kit bundled OCR remains available offline.\n-keep class com.google.mlkit.vision.text.** { *; }\n-dontwarn com.google.mlkit.**\n")
 print("Enabled R8/resource shrinking and ARM-only packaging while retaining offline OCR.")
