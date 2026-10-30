@@ -2118,25 +2118,28 @@ old_header = '''        header.addView(TextView(this).apply {
         brand.addView(txt("com.alkamel.cardfinder", 11f, muted))
         header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))'''
 new_header = '''        val brand = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(8, 8, 8, 8)
         }
         val brandLogo = android.widget.ImageView(this).apply {
             setImageResource(R.mipmap.ic_launcher)
-            scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
-            background = bg(0xFFFF9800.toInt(), 0xFFFF9800.toInt(), 14f)
-            clipToOutline = true
-            layoutParams = LinearLayout.LayoutParams(54, 54).apply { setMargins(4, 0, 10, 0) }
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            layoutParams = LinearLayout.LayoutParams(88, 88).apply {
+                gravity = Gravity.CENTER
+                bottomMargin = 6
+            }
             contentDescription = "شعار تطبيق الكامل"
         }
         brand.addView(brandLogo)
         val brandText = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_VERTICAL
+            gravity = Gravity.CENTER
         }
-        brandText.addView(txt("الكامل", 22f, 0xFFFFFFFF.toInt(), true))
-        brandText.addView(txt("الباحث الذكي", 13f, gold, true))
+        brandText.addView(txt("الكامل", 24f, 0xFFFFFFFF.toInt(), true))
+        brandText.addView(txt("الباحث الذكي", 15f, gold, true))
         brand.addView(brandText)
+        header.gravity = Gravity.CENTER
         header.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))'''
 if old_header not in k:
     raise SystemExit("Expected app header block not found; refusing unsafe UI patch.")
