@@ -2165,3 +2165,39 @@ for glyph in ["⌂", "⌕", "◎", "⇧", "▤", "☷"]:
     k = k.replace(glyph + r"\\n", glyph + r"\n")
 main.write_text(k)
 print("Normalized bottom navigation line breaks.")
+
+
+# Add a tappable copyright footer that opens a WhatsApp chat with the owner.
+k = main.read_text()
+footer_anchor = '''        outer.addView(bottom, LinearLayout.LayoutParams(-1, -2))
+        setContentView(outer)'''
+footer_replacement = '''        outer.addView(bottom, LinearLayout.LayoutParams(-1, -2))
+        val copyright = TextView(this).apply {
+            text = "حقوق الملكية © محمد كامل - 772072056"
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setTextColor(0xFFB7C4D8.toInt())
+            setPadding(8, 9, 8, 10)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "حقوق الملكية - التواصل مع محمد كامل عبر واتساب"
+            setOnClickListener {
+                try {
+                    val whatsapp = android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        Uri.parse("https://wa.me/967772072056")
+                    )
+                    startActivity(whatsapp)
+                } catch (e: Exception) {
+                    showStatus("تعذر فتح واتساب. تأكد من تثبيته.")
+                }
+            }
+        }
+        outer.addView(copyright, LinearLayout.LayoutParams(-1, -2))
+        setContentView(outer)'''
+if footer_anchor not in k:
+    raise SystemExit("Bottom navigation footer insertion point not found.")
+if "حقوق الملكية © محمد كامل - 772072056" not in k:
+    k = k.replace(footer_anchor, footer_replacement, 1)
+main.write_text(k)
+print("Added clickable copyright footer linked to WhatsApp.")
