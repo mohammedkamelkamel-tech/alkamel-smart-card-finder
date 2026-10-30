@@ -1100,3 +1100,188 @@ pdf_method = '''    private suspend fun readPdfNumbers(uri: Uri, cat: String, na
 k = k[:a] + pdf_method + k[b:]
 main.write_text(k)
 print("Added PDF text-layer extraction as the primary path, with OCR fallback for scanned PDFs.")
+
+
+# Backup/restore, clearer selectors, requested denomination palette, and faster bulk inserts.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+if "private val createBackup" not in k:
+    anchor = '''    private val openFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importDocument(uri)
+    }'''
+    add = anchor + '''
+    private val createBackup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        if (uri != null) writeBackup(uri)
+    }
+    private val restoreBackup = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) confirmRestore(uri)
+    }'''
+    if anchor not in k: raise SystemExit("Backup picker insertion anchor missing")
+    k = k.replace(anchor, add, 1)
+
+anchor = '''        content.addView(action("تحديث إحصائيات المخزون", gold) { refreshStats() })'''
+if anchor in k and "إنشاء نسخة احتياطية" not in k:
+    k = k.replace(anchor, anchor + '''
+        content.addView(txt("النسخ الاحتياطي وحماية المخزون", 19f, 0xFFFFFFFF.toInt(), true), lp())
+        content.addView(action("إنشاء نسخة احتياطية واختيار مكان الحفظ", 0xFF13B981.toInt()) {
+            createBackup.launch("alkamel-cards-backup.db")
+        })
+        content.addView(action("استعادة نسخة احتياطية", 0xFF4385F5.toInt()) {
+            restoreBackup.launch(arrayOf("*/*"))
+        })''', 1)
+
+if "private fun writeBackup(uri: Uri)" not in k:
+    anchor = "    private fun openCamera() {"
+    methods = '''    private fun writeBackup(uri: Uri) {
+        lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val database = db.writableDatabase
+                    database.rawQuery("PRAGMA wal_checkpoint(FULL)", null).use { while (it.moveToNext()) {} }
+                    val source = getDatabasePath("alkamel_cards.db")
+                    if (!source.exists()) throw IllegalStateException("قاعدة البيانات غير موجودة")
+                    contentResolver.openOutputStream(uri, "wt")?.use { output ->
+                        source.inputStream().use { input -> input.copyTo(output) }
+                    } ?: throw IllegalStateException("تعذر الكتابة إلى مكان النسخة")
+                }
+                showStatus("تم إنشاء النسخة الاحتياطية بنجاح في المكان الذي اخترته.")
+                AlertDialog.Builder(this@MainActivity).setTitle("اكتملت النسخة الاحتياطية")
+                    .setMessage("تم حفظ قاعدة بيانات الكروت. احتفظ بالملف في مكان آمن.")
+                    .setPositiveButton("حسناً", null).show()
+            } catch (e: Exception) {
+                showStatus("فشل إنشاء النسخة الاحتياطية: \${e.localizedMessage}")
+            }
+        }
+    }
+
+    private fun confirmRestore(uri: Uri) {
+        AlertDialog.Builder(this)
+            .setTitle("تأكيد استعادة النسخة")
+            .setMessage("سيتم استبدال قاعدة الكروت الحالية بمحتويات النسخة المختارة. أنشئ نسخة احتياطية من بياناتك الحالية أولاً. هل تريد المتابعة؟")
+            .setNegativeButton("إلغاء", null)
+            .setPositiveButton("استعادة") { _, _ -> restoreFromUri(uri) }
+            .show()
+    }
+
+    private fun restoreFromUri(uri: Uri) {
+        lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val temp = File(cacheDir, "restore_cards_" + System.currentTimeMillis() + ".db")
+                    contentResolver.openInputStream(uri)?.use { input ->
+                        temp.outputStream().use { output -> input.copyTo(output) }
+                    } ?: throw IllegalStateException("تعذر قراءة ملف النسخة")
+                    val check = android.database.sqlite.SQLiteDatabase.openDatabase(
+                        temp.absolutePath, null, android.database.sqlite.SQLiteDatabase.OPEN_READONLY
+                    )
+                    check.rawQuery("SELECT number, category, source, page FROM cards LIMIT 1", null).use { }
+                    check.close()
+                    db.close()
+                    val target = getDatabasePath("alkamel_cards.db")
+                    target.parentFile?.mkdirs()
+                    File(target.absolutePath + "-wal").delete()
+                    File(target.absolutePath + "-shm").delete()
+                    temp.copyTo(target, overwrite = true)
+                    temp.delete()
+                    db = CardDb(this@MainActivity)
+                    db.writableDatabase
+                }
+                refreshStats()
+                showStatus("تمت استعادة النسخة الاحتياطية بنجاح.")
+            } catch (e: Exception) {
+                showStatus("تعذرت استعادة النسخة: \${e.localizedMessage}")
+            }
+        }
+    }
+
+'''
+    if anchor not in k: raise SystemExit("Backup methods anchor missing")
+    k = k.replace(anchor, methods + anchor, 1)
+
+adapter = '''    private fun styledCategoryAdapter(): ArrayAdapter<String> =
+        object : ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, categories) {
+            override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
+                val view = super.getView(position, convertView, parent)
+                (view as? TextView)?.apply {
+                    setTextColor(0xFFFFFFFF.toInt())
+                    textSize = 18f
+                    gravity = Gravity.CENTER_VERTICAL or Gravity.RIGHT
+                    setPadding(12, 8, 12, 8)
+                }
+                return view
+            }
+            override fun getDropDownView(position: Int, convertView: View?, parent: android.view.ViewGroup): View {
+                val view = super.getDropDownView(position, convertView, parent)
+                (view as? TextView)?.apply {
+                    setTextColor(0xFFFFFFFF.toInt())
+                    setBackgroundColor(0xFF17243A.toInt())
+                    textSize = 17f
+                    setPadding(18, 14, 18, 14)
+                }
+                return view
+            }
+        }
+
+'''
+if "private fun styledCategoryAdapter()" not in k:
+    anchor = "    private fun label(text: String)"
+    if anchor not in k: raise SystemExit("Adapter helper anchor missing")
+    k = k.replace(anchor, adapter + anchor, 1)
+k = k.replace('adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, categories).also {\n                it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)\n            }',
+              'adapter = styledCategoryAdapter().also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }')
+
+k = k.replace('val colors = listOf(green, blue, gold, purple)',
+              'val colors = listOf(0xFFE53935.toInt(), purple, green, cyan)')
+k = k.replace('txt("1) اختر فئة الكرت التي تريد البحث فيها", 17f, gold, true)',
+              'txt("① اختر فئة الكرت التي تريد البحث فيها", 18f, 0xFFFFD54F.toInt(), true).apply { setPadding(8, 15, 8, 10) }')
+k = k.replace('txt("2) اكتب الرقم الناقص أو الجزء الظاهر من الكرت", 17f, 0xFFFFFFFF.toInt(), true)',
+              'txt("② اكتب الرقم الناقص أو الجزء الظاهر من الكرت", 18f, 0xFFFFFFFF.toInt(), true).apply { setPadding(8, 15, 8, 10) }')
+k = k.replace('txt("حدد فئة الملف قبل اختياره", 16f, gold, true)',
+              'txt("حدد فئة الملف قبل اختياره", 18f, 0xFFFFD54F.toInt(), true).apply { setPadding(8, 14, 8, 8) }')
+
+k = k.replace(r'الصفحة \${i + 1} من \${renderer.pageCount}',
+              r'الصفحة \${i + 1} من \${renderer.pageCount}')
+
+if "override fun onOpen(db: android.database.sqlite.SQLiteDatabase)" not in k:
+    anchor = "    override fun onUpgrade(db: android.database.sqlite.SQLiteDatabase, oldVersion: Int, newVersion: Int) {}"
+    onopen = anchor + '''
+    
+    override fun onOpen(db: android.database.sqlite.SQLiteDatabase) {
+        super.onOpen(db)
+        db.execSQL("DELETE FROM cards WHERE id NOT IN (SELECT MIN(id) FROM cards GROUP BY number)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS idx_cards_number_unique ON cards(number)")
+    }'''
+    if anchor not in k: raise SystemExit("CardDb onOpen anchor missing")
+    k = k.replace(anchor, onopen, 1)
+
+a = k.index("    fun insertMany(numbers: List<String>, category: String, source: String, page: Int): Int {")
+b = k.index("    fun search(query: String", a)
+bulk = '''    fun insertMany(numbers: List<String>, category: String, source: String, page: Int): Int {
+        val database = writableDatabase
+        var added = 0
+        database.beginTransaction()
+        try {
+            val statement = database.compileStatement(
+                "INSERT OR IGNORE INTO cards(number, category, source, page) VALUES(?, ?, ?, ?)"
+            )
+            try {
+                numbers.asSequence().map { it.trim() }.distinct().forEach { number ->
+                    if (number.length == 11 && number.all { it in '0'..'9' }) {
+                        statement.clearBindings()
+                        statement.bindString(1, number)
+                        statement.bindString(2, category)
+                        statement.bindString(3, source)
+                        statement.bindLong(4, page.toLong())
+                        if (statement.executeInsert() != -1L) added++
+                    }
+                }
+            } finally { statement.close() }
+            database.setTransactionSuccessful()
+        } finally { database.endTransaction() }
+        return added
+    }
+
+'''
+k = k[:a] + bulk + k[b:]
+main.write_text(k)
+print("Added user-selected backup/restore, high-contrast selectors, requested category colors, and faster indexed batch insertion.")
