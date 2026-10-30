@@ -2157,3 +2157,11 @@ else:
 
 main.write_text(k)
 print("Removed package identifier, added launcher logo beside app name, and fixed bottom navigation newlines.")
+
+
+# Normalize escaped newline literals in Kotlin bottom-navigation labels.
+k = main.read_text()
+for glyph in ["⌂", "⌕", "◎", "⇧", "▤", "☷"]:
+    k = k.replace('"' + glyph + "\\\\\\\\n"', '"' + glyph + "\\\\n"')
+main.write_text(k)
+print("Normalized bottom navigation line breaks.")
