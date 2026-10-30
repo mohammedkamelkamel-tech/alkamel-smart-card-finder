@@ -1436,3 +1436,49 @@ ocr_search = '''    private fun readImage(uri: Uri) {
 k = k[:a] + ocr_search + k[b:]
 main.write_text(k)
 print("Unified camera/gallery OCR results with the typed database search and all-category fallback.")
+
+
+# Restore OCR preprocessing helpers that were removed when the image flow was unified.
+# PDF extraction also calls recognizeBest, while the camera/gallery flow uses
+# recognizeAttempts; both share these preprocessing implementations.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+anchor = "    private suspend fun recognize(image: InputImage): Text ="
+if "private suspend fun recognizeBest(bitmap: Bitmap): String" not in k:
+    helpers = '''    private suspend fun recognizeBest(bitmap: Bitmap): String {
+        val attempts = recognizeAttempts(bitmap)
+        return attempts.maxByOrNull { text ->
+            Regex("\\\\d{7,15}").findAll(normalizeDigits(text)).count()
+        }.orEmpty()
+    }
+
+    private fun enhanceForDarkDigits(source: Bitmap, threshold: Boolean): Bitmap {
+        val scale = minOf(2.0f, 2200f / maxOf(source.width, source.height).toFloat()).coerceAtLeast(1f)
+        val width = (source.width * scale).toInt().coerceAtLeast(1)
+        val height = (source.height * scale).toInt().coerceAtLeast(1)
+        val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+            colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
+        }
+        Canvas(output).drawBitmap(source, null, android.graphics.Rect(0, 0, width, height), paint)
+        val pixels = IntArray(width * height)
+        output.getPixels(pixels, 0, width, 0, 0, width, height)
+        for (index in pixels.indices) {
+            val pixel = pixels[index]
+            val gray = (Color.red(pixel) * 0.299 + Color.green(pixel) * 0.587 + Color.blue(pixel) * 0.114).toInt()
+            val value = if (threshold) {
+                if (gray < 175) 0 else 255
+            } else {
+                ((gray - 128) * 1.8 + 128).toInt().coerceIn(0, 255)
+            }
+            pixels[index] = Color.rgb(value, value, value)
+        }
+        output.setPixels(pixels, 0, width, 0, 0, width, height)
+        return output
+    }
+
+'''
+    if anchor not in k: raise SystemExit("recognize() anchor missing")
+    k = k.replace(anchor, helpers + anchor, 1)
+main.write_text(k)
+print("Restored OCR preprocessing helper functions required by camera/gallery and PDF OCR.")
