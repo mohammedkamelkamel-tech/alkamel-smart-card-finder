@@ -140,5 +140,55 @@ s = s.replace('val scale = minOf(2.0, 1800.0 / maxOf(page.width, page.height))',
 s = s.replace('val text = recognize(InputImage.fromBitmap(bitmap, 0)).text', 'val text = recognizeBest(bitmap)')
 s = s.replace('showStatus("قراءة PDF: الصفحة ${i + 1} من ${renderer.pageCount}")', 'importProgress.progress = (((i + 1) * 100f) / renderer.pageCount.coerceAtLeast(1)).toInt(); showStatus("قراءة الملف $name: ${importProgress.progress}% — الصفحة ${i + 1} من ${renderer.pageCount}")')
 
+# Visual redesign: coordinated red, purple, green, gold, cyan and blue palette.
+s = s.replace('setBackgroundColor(0xFFF4F7F5.toInt())', 'setBackgroundColor(0xFFF5F6FA.toInt())')
+s = s.replace('setTextColor(0xFF126B3A.toInt()); setPadding(4, 12, 4, 18)',
+              'setTextColor(0xFF283B72.toInt()); setPadding(12, 22, 12, 22); textSize = 23f; typeface = android.graphics.Typeface.DEFAULT_BOLD')
+s = s.replace('setTextColor(0xFF52645A.toInt())', 'setTextColor(0xFF596579.toInt())')
+s = s.replace('setTextColor(0xFF263B30.toInt())', 'setTextColor(0xFF34415F.toInt()); typeface = android.graphics.Typeface.DEFAULT_BOLD')
+s = s.replace('setTextColor(0xFF24543A.toInt())', 'setTextColor(0xFF2864D7.toInt())')
+s = s.replace('setTextColor(0xFF7A5B22.toInt())', 'setTextColor(0xFF9A6B12.toInt())')
+# Give the six main actions distinct but coordinated colors and rounded corners.
+s = s.replace('''        isAllCaps = false
+        setOnClickListener { action() }''', '''        isAllCaps = false
+        textSize = 15f
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+        setTextColor(android.graphics.Color.WHITE)
+        val palette = listOf(0xFFE53935.toInt(), 0xFF8E44AD.toInt(), 0xFF20A464.toInt(),
+            0xFFD5A126.toInt(), 0xFF27B6DE.toInt(), 0xFF2864D7.toInt())
+        val color = when {
+            text.contains("استيراد") -> palette[3]
+            text.contains("تصوير") -> palette[0]
+            text.contains("اختيار صورة") -> palette[1]
+            text.contains("ابحث") -> palette[5]
+            text.contains("إحصائيات") -> palette[2]
+            else -> palette[(text.hashCode().ushr(1) % palette.size)]
+        }
+        background = android.graphics.drawable.GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = 18f
+        }
+        setPadding(14, 12, 14, 12)
+        val params = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT)
+        params.setMargins(0, 7, 0, 7)
+        layoutParams = params
+        setOnClickListener { action() }''')
+# Add a subtle white panel behind the search field and a colorful progress indicator.
+s = s.replace('''            setPadding(12, 10, 12, 10)
+        }
+        root.addView(searchBox)''', '''            setPadding(12, 10, 12, 10)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xFFFFFFFF.toInt())
+                setStroke(2, 0xFFD9E0EE.toInt())
+                cornerRadius = 16f
+            }
+        }
+        root.addView(searchBox)''')
+s = s.replace('''            max = 100; progress = 0; visibility = View.GONE
+        }''', '''            max = 100; progress = 0; visibility = View.GONE
+            progressTintList = android.content.res.ColorStateList.valueOf(0xFF27B6DE.toInt())
+        }''')
+
 p.write_text(s)
 print("Applied OCR, image-picker, and import-progress updates.")
