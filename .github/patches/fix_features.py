@@ -1745,3 +1745,53 @@ if "private suspend fun recognizeAttempts(bitmap: Bitmap): List<String>" not in 
     k = k.replace(anchor, helper + anchor, 1)
 main.write_text(k)
 print("Restored recognizeAttempts() required by camera/gallery OCR and PDF OCR.")
+
+
+# Final safety net: camera, gallery and PDF OCR all need the same helpers.
+# Keep this block at the very end so later UI/OCR replacements cannot remove them.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+anchor = "    private suspend fun recognize(image: InputImage): Text ="
+missing = []
+if "private suspend fun recognizeAttempts(bitmap: Bitmap): List<String>" not in k:
+    missing.append('''    private suspend fun recognizeAttempts(bitmap: Bitmap): List<String> {
+        val attempts = mutableListOf<String>()
+        attempts.add(recognize(InputImage.fromBitmap(bitmap, 0)).text)
+        for (threshold in listOf(false, true)) {
+            val processed = enhanceForDarkDigits(bitmap, threshold)
+            try { attempts.add(recognize(InputImage.fromBitmap(processed, 0)).text) }
+            finally { processed.recycle() }
+        }
+        return attempts
+    }
+
+''')
+if "private suspend fun recognizeBest(bitmap: Bitmap): String" not in k:
+    missing.append('''    private suspend fun recognizeBest(bitmap: Bitmap): String =
+        recognizeAttempts(bitmap).maxByOrNull { text ->
+            Regex("\\\\d{7,15}").findAll(normalizeDigits(text)).count()
+        }.orEmpty()
+
+''')
+if "private fun enhanceForDarkDigits(source: Bitmap, threshold: Boolean): Bitmap" not in k:
+    missing.append('''    private fun enhanceForDarkDigits(source: Bitmap, threshold: Boolean): Bitmap {
+        val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
+        val pixels = IntArray(source.width * source.height)
+        source.getPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
+        for (i in pixels.indices) {
+            val c = pixels[i]
+            val gray = (Color.red(c) * 299 + Color.green(c) * 587 + Color.blue(c) * 114) / 1000
+            val value = if (threshold) { if (gray < 175) 0 else 255 }
+                        else { ((gray - 128) * 2 + 128).coerceIn(0, 255) }
+            pixels[i] = Color.rgb(value, value, value)
+        }
+        output.setPixels(pixels, 0, source.width, 0, 0, source.width, source.height)
+        return output
+    }
+
+''')
+if missing:
+    if anchor not in k: raise SystemExit("Cannot insert OCR helper functions: recognize() anchor missing")
+    k = k.replace(anchor, "".join(missing) + anchor, 1)
+    main.write_text(k)
+print("Final OCR helper validation/insertion completed: " + str(len(missing)) + " helper(s) restored.")
