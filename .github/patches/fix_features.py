@@ -769,3 +769,130 @@ if "private fun enhanceForDarkDigits(source: Bitmap, threshold: Boolean): Bitmap
     k = k.replace(marker, helpers + marker, 1)
 main.write_text(k)
 print("Restored recognizeBest and image enhancement helpers.")
+
+
+# Make the manual search field and denomination selectors unmistakably visible and interactive.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+
+# Separate search-category selection from import-category selection, while synchronizing both.
+if "private lateinit var searchCategory: Spinner" not in k:
+    k = k.replace("private lateinit var category: Spinner", "private lateinit var category: Spinner\n    private lateinit var searchCategory: Spinner")
+
+# Add a clear category selector directly above the manual search input.
+needle = '''        hero.addView(txt("البحث عن رقم الكرت", 18f, 0xFFFFFFFF.toInt(), true))
+        val searchRow = LinearLayout(this).apply {'''
+replacement = '''        hero.addView(txt("1) اختر فئة الكرت التي تريد البحث فيها", 17f, gold, true))
+        searchCategory = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, categories).also {
+                it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            setBackground(bg(0xFF101A2E.toInt(), gold, 12f))
+            setPadding(14, 8, 14, 8)
+            minimumHeight = 54
+            setSelection(0)
+        }
+        hero.addView(searchCategory, lp())
+        hero.addView(txt("2) اكتب الرقم الناقص أو الجزء الظاهر من الكرت", 17f, 0xFFFFFFFF.toInt(), true))
+        val searchRow = LinearLayout(this).apply {'''
+if needle not in k:
+    raise SystemExit("Search area anchor not found")
+k = k.replace(needle, replacement, 1)
+
+# Give the EditText a visible outlined background and fixed touch height.
+k = k.replace(
+'''            hint = "أدخل الرقم أو الأرقام الظاهرة"; textSize = 17f; setSingleLine(true)
+            setTextColor(0xFFFFFFFF.toInt()); setHintTextColor(0xFF71809A.toInt())
+            layoutDirection = View.LAYOUT_DIRECTION_LTR; gravity = Gravity.CENTER
+            setPadding(7, 8, 7, 8); background = null''',
+'''            hint = "اكتب رقم الكرت الناقص هنا"; textSize = 19f; setSingleLine(true)
+            setTextColor(0xFFFFFFFF.toInt()); setHintTextColor(0xFFB7C4D8.toInt())
+            layoutDirection = View.LAYOUT_DIRECTION_LTR; gravity = Gravity.CENTER
+            setPadding(10, 8, 10, 8); background = bg(0xFF17243A.toInt(), 0xFF5D7395.toInt(), 10f)
+            minHeight = 58
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH'''
+)
+k = k.replace('searchRow.addView(searchBox, LinearLayout.LayoutParams(0, -2, 1f))',
+              'searchRow.addView(searchBox, LinearLayout.LayoutParams(0, 60, 1f))')
+k = k.replace('searchRow.addView(action("بحث  ←", 0xFFFF9800.toInt()) { searchCards() })',
+              'searchRow.addView(action("بحث 🔎", 0xFFFF9800.toInt()) { searchCards() }, LinearLayout.LayoutParams(WRAP_CONTENT, 60))')
+
+# Make the denomination cards themselves selectable and show selection with a check mark/border.
+old = '''            card.addView(txt(cat, 17f, colors[index], true))
+            card.addView(txt(db.countCategory(cat).toString() + " كرت مخزن", 14f, 0xFFD4DCEC.toInt()))
+            val gp = android.widget.GridLayout.LayoutParams().apply {'''
+new = '''            val title = txt(cat + if (index == 0) "  ✓" else "", 17f, colors[index], true)
+            card.addView(title)
+            card.addView(txt(db.countCategory(cat).toString() + " كرت مخزن", 14f, 0xFFD4DCEC.toInt()))
+            card.isClickable = true
+            card.isFocusable = true
+            card.setOnClickListener {
+                searchCategory.setSelection(index)
+                category.setSelection(index)
+                for (childIndex in 0 until grid.childCount) {
+                    val child = grid.getChildAt(childIndex) as? LinearLayout ?: continue
+                    child.background = bg(0xFF101A2E.toInt(), if (childIndex == index) colors[childIndex] else 0xFF35445E.toInt(), 12f)
+                    val heading = child.getChildAt(0) as? TextView
+                    heading?.text = categories[childIndex] + if (childIndex == index) "  ✓ محددة" else ""
+                }
+                showStatus("تم تحديد فئة $cat للبحث والاستيراد.")
+            }
+            val gp = android.widget.GridLayout.LayoutParams().apply {'''
+if old not in k:
+    raise SystemExit("Category grid anchor not found")
+k = k.replace(old, new, 1)
+
+# Re-style import spinner so its selected category is visible against the dark screen.
+old = '''        category = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, categories)
+        }
+        content.addView(category, lp())'''
+new = '''        content.addView(txt("حدد فئة الملف قبل اختياره", 16f, gold, true), lp())
+        category = Spinner(this).apply {
+            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, categories).also {
+                it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            setBackground(bg(0xFF101A2E.toInt(), gold, 12f))
+            setPadding(14, 8, 14, 8)
+            minimumHeight = 56
+            setSelection(searchCategory.selectedItemPosition)
+            onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+                override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    if (searchCategory.selectedItemPosition != position) searchCategory.setSelection(position)
+                    showStatus("الفئة المحددة للاستيراد والبحث: \${categories[position]}")
+                }
+            }
+        }
+        searchCategory.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (::category.isInitialized && category.selectedItemPosition != position) category.setSelection(position)
+            }
+        }
+        content.addView(category, lp())'''
+if old not in k:
+    raise SystemExit("Import spinner anchor not found")
+k = k.replace(old, new, 1)
+
+# Always scope manual search and OCR fragment recovery to the clearly selected search category.
+k = k.replace("categories.getOrNull(category.selectedItemPosition)", "categories.getOrNull(searchCategory.selectedItemPosition)")
+k = k.replace("categories.getOrNull(category.selectedItemPosition)", "categories.getOrNull(searchCategory.selectedItemPosition)")
+k = k.replace("val cat = categories[category.selectedItemPosition]", "val cat = categories[category.selectedItemPosition]")
+
+# Ensure keyboard search executes the same selected-category search.
+if "searchBox.setOnEditorActionListener" not in k:
+    k = k.replace(
+        'searchRow.addView(searchBox, LinearLayout.LayoutParams(0, 60, 1f))',
+        '''searchBox.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH ||
+                actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+                searchCards(); true
+            } else false
+        }
+        searchRow.addView(searchBox, LinearLayout.LayoutParams(0, 60, 1f))'''
+    )
+
+main.write_text(k)
+print("Added visible manual search input, clear category pickers, selectable category cards, and synchronized search/import category.")
