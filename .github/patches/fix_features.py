@@ -121,7 +121,7 @@ s = s[:a] + '''    private fun readTextNumbers(uri: Uri, cat: String, name: Stri
         val text = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
             ?: throw IllegalStateException("تعذر قراءة الملف")
         val normalized = normalizeDigits(text)
-        val matches = Regex("(?<!\\\\d)\\\\d{7,15}(?!\\\\d)").findAll(normalized).map { it.value }.toList()
+        val matches = Regex("(?<!\\\\d)\\\\d{11}(?!\\\\d)").findAll(normalized).map { it.value }.distinct().toList()
         val batches = matches.chunked(500)
         var added = 0
         batches.forEachIndexed { index, batch ->
