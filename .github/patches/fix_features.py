@@ -1718,3 +1718,30 @@ handler = '''    private fun searchCards() {
 k = k[:a] + handler + k[b:]
 main.write_text(k)
 print("Added strict prefix/suffix matching for dotted card numbers and RTL-reversed visual order.")
+
+
+# Ensure all OCR helper methods exist after the camera/PDF patch stages.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+anchor = "    private suspend fun recognize(image: InputImage): Text ="
+if "private suspend fun recognizeAttempts(bitmap: Bitmap): List<String>" not in k:
+    helper = '''    private suspend fun recognizeAttempts(bitmap: Bitmap): List<String> {
+        val attempts = mutableListOf<String>()
+        attempts.add(recognize(InputImage.fromBitmap(bitmap, 0)).text)
+        for (threshold in listOf(false, true)) {
+            val processed = enhanceForDarkDigits(bitmap, threshold)
+            try {
+                attempts.add(recognize(InputImage.fromBitmap(processed, 0)).text)
+            } finally {
+                processed.recycle()
+            }
+        }
+        return attempts
+    }
+
+'''
+    if anchor not in k:
+        raise SystemExit("Cannot restore OCR helpers: recognize() declaration not found")
+    k = k.replace(anchor, helper + anchor, 1)
+main.write_text(k)
+print("Restored recognizeAttempts() required by camera/gallery OCR and PDF OCR.")
