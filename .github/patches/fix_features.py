@@ -994,3 +994,109 @@ k = k.replace(
 )
 main.write_text(k)
 print("Enabled literal dot entry in the card search box.")
+
+
+# Prefer the PDF's embedded text layer before OCR. This preserves every printed card
+# number in text-based PDFs and avoids losing digits due to OCR misses.
+gradle_file = Path("app/build.gradle")
+g = gradle_file.read_text()
+dep = "implementation 'com.tom-roush:pdfbox-android:2.0.27.0'"
+if dep not in g:
+    g = g.replace("dependencies {", "dependencies {\n    " + dep)
+gradle_file.write_text(g)
+
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+if "import com.tom_roush.pdfbox.android.PDFBoxResourceLoader" not in k:
+    k = k.replace(
+        "package com.alkamel.cardfinder",
+        "package com.alkamel.cardfinder\n\nimport com.tom_roush.pdfbox.android.PDFBoxResourceLoader\nimport com.tom_roush.pdfbox.pdmodel.PDDocument\nimport com.tom_roush.pdfbox.text.PDFTextStripper",
+        1
+    )
+
+a = k.index("    private suspend fun readPdfNumbers(uri: Uri, cat: String, name: String): Int {")
+b_candidates = [x for x in [
+    k.find("\n    private fun ", a + 10),
+    k.find("\n    private suspend fun ", a + 10),
+    k.find("\n    fun ", a + 10)
+] if x >= 0]
+if not b_candidates:
+    raise SystemExit("Could not locate end of PDF import method")
+b = min(b_candidates)
+
+pdf_method = '''    private suspend fun readPdfNumbers(uri: Uri, cat: String, name: String): Int {
+        val extracted = linkedSetOf<String>()
+        var textLayerRead = false
+        try {
+            PDFBoxResourceLoader.init(applicationContext)
+            contentResolver.openInputStream(uri)?.use { input ->
+                PDDocument.load(input).use { document ->
+                    val pdfText = PDFTextStripper().getText(document)
+                    val normalized = normalizeDigits(pdfText)
+                    extracted.addAll(
+                        Regex("(?<!\\\\\\\\d)\\\\\\\\d{11}(?!\\\\\\\\d)")
+                            .findAll(normalized).map { it.value }
+                    )
+                    textLayerRead = extracted.isNotEmpty()
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("CardFinder", "PDF text extraction unavailable; falling back to OCR", e)
+        }
+
+        if (!textLayerRead) {
+            val descriptor = contentResolver.openFileDescriptor(uri, "r")
+                ?: throw IllegalStateException("تعذر فتح ملف PDF")
+            descriptor.use { pfd ->
+                val renderer = android.graphics.pdf.PdfRenderer(pfd)
+                try {
+                    for (i in 0 until renderer.pageCount) {
+                        renderer.openPage(i).use { page ->
+                            val scale = minOf(2.5f, 2200f / maxOf(page.width, page.height).toFloat())
+                            val bitmap = Bitmap.createBitmap(
+                                (page.width * scale).toInt().coerceAtLeast(1),
+                                (page.height * scale).toInt().coerceAtLeast(1),
+                                Bitmap.Config.ARGB_8888
+                            )
+                            try {
+                                page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                val recognized = recognizeBest(bitmap)
+                                val normalized = normalizeDigits(recognized)
+                                extracted.addAll(
+                                    Regex("(?<!\\\\\\\\d)\\\\\\\\d{11}(?!\\\\\\\\d)")
+                                        .findAll(normalized).map { it.value }
+                                )
+                            } finally { bitmap.recycle() }
+                        }
+                        val percent = (((i + 1) * 100f) / renderer.pageCount.coerceAtLeast(1)).toInt()
+                        runOnUiThread {
+                            importProgress.progress = percent
+                            showStatus("قراءة الملف $name: $percent% — الصفحة \${i + 1} من \${renderer.pageCount}")
+                        }
+                    }
+                } finally { renderer.close() }
+            }
+        }
+
+        if (extracted.isEmpty()) throw IllegalStateException("لم يتم العثور على أرقام كروت من 11 خانة في الملف")
+        val cards = extracted.toList()
+        val batches = cards.chunked(500)
+        var added = 0
+        batches.forEachIndexed { index, batch ->
+            added += db.insertMany(batch, cat, name, 0)
+            val percent = (((index + 1) * 100f) / batches.size.coerceAtLeast(1)).toInt()
+            runOnUiThread {
+                importProgress.progress = percent
+                showStatus("حفظ كروت PDF: $percent% — \${index + 1}/\${batches.size}")
+            }
+        }
+        runOnUiThread {
+            showStatus("اكتمل استخراج \${cards.size} رقم فريد من الملف؛ أضيف جديداً $added")
+        }
+        return added
+    }
+
+'''
+k = k[:a] + pdf_method + k[b:]
+main.write_text(k)
+print("Added PDF text-layer extraction as the primary path, with OCR fallback for scanned PDFs.")
