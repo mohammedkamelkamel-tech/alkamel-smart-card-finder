@@ -5,6 +5,7 @@ on:
     paths:
       - 'alkamel-smart-card-finder-project.zip'
       - '.github/workflows/build.yml'
+      - '.github/patches/**'
   workflow_dispatch:
 
 jobs:
@@ -33,6 +34,9 @@ jobs:
           print(f"Fixed singleLine occurrences: {n1}")
           print(f"Fixed nullable cameraUri launches: {n2}")
           PY
+
+      - name: Apply image OCR and import progress improvements
+        run: python3 .github/patches/fix_features.py
 
       - name: Set up Java
         uses: actions/setup-java@v4
