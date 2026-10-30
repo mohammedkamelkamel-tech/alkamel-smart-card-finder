@@ -2204,3 +2204,28 @@ if "حقوق الملكية © محمد كامل - 772072056" not in k:
     k = k.replace(footer_anchor, footer_replacement, 1)
 main.write_text(k)
 print("Added clickable copyright footer linked to WhatsApp.")
+
+
+# Correct logo sizing: Android programmatic LayoutParams are pixels, not dp.
+# Use a true 200dp square for the logo only; leave title and subtitle sizes unchanged.
+k = main.read_text()
+logo_old = '''layoutParams = LinearLayout.LayoutParams(150, 150).apply {
+                gravity = Gravity.CENTER
+                bottomMargin = 6
+            }'''
+logo_new = '''layoutParams = LinearLayout.LayoutParams(
+                (200 * resources.displayMetrics.density).toInt(),
+                (200 * resources.displayMetrics.density).toInt()
+            ).apply {
+                gravity = Gravity.CENTER
+                bottomMargin = 6
+            }'''
+if logo_old not in k:
+    raise SystemExit("Expected logo size block not found; refusing unsafe resize.")
+k = k.replace(logo_old, logo_new, 1)
+
+# Make the hint fit clearly in the search box; keep the input box dimensions unchanged.
+k = k.replace('hint = "اكتب رقم الكرت الناقص هنا"; textSize = 22f; setSingleLine(true)',
+              'hint = "اكتب رقم الكرت الناقص هنا"; textSize = 16f; setSingleLine(true)', 1)
+main.write_text(k)
+print("Resized only the logo to 200dp and reduced search hint font to 16sp.")
