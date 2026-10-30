@@ -727,3 +727,45 @@ k = k.replace('showStatus("تم العثور على " + recovered.size + " اح�
               'showStatus("تم العثور على " + recovered.size + " احتمال مطابق في فئة " + categories.getOrNull(category.selectedItemPosition) + ".")')
 main.write_text(k)
 print("Updated database matching to search within the selected category and support missing digits at either end or in the middle.")
+
+
+# Restore image preprocessing helpers required by the camera and OCR flows.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+marker = "    private suspend fun recognize(image: InputImage): Text ="
+if "private fun enhanceForDarkDigits(source: Bitmap, threshold: Boolean): Bitmap" not in k:
+    helpers = '''    private suspend fun recognizeBest(bitmap: Bitmap): String =
+        recognizeAttempts(bitmap).maxByOrNull {
+            Regex("\\\\\\\\d{7,15}").findAll(normalizeDigits(it)).count()
+        }.orEmpty()
+
+    private fun enhanceForDarkDigits(source: Bitmap, threshold: Boolean): Bitmap {
+        val scale = minOf(2.0f, 2200f / maxOf(source.width, source.height).toFloat()).coerceAtLeast(1f)
+        val w = (source.width * scale).toInt().coerceAtLeast(1)
+        val h = (source.height * scale).toInt().coerceAtLeast(1)
+        val output = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        paint.colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
+        Canvas(output).drawBitmap(source, null, android.graphics.Rect(0, 0, w, h), paint)
+        val pixels = IntArray(w * h)
+        output.getPixels(pixels, 0, w, 0, 0, w, h)
+        for (i in pixels.indices) {
+            val c = pixels[i]
+            val gray = (Color.red(c) * 0.299 + Color.green(c) * 0.587 + Color.blue(c) * 0.114).toInt()
+            val value = if (threshold) {
+                if (gray < 175) 0 else 255
+            } else {
+                ((gray - 128) * 1.8 + 128).toInt().coerceIn(0, 255)
+            }
+            pixels[i] = Color.rgb(value, value, value)
+        }
+        output.setPixels(pixels, 0, w, 0, 0, w, h)
+        return output
+    }
+
+'''
+    if marker not in k:
+        raise SystemExit("Could not find OCR recognizer insertion point")
+    k = k.replace(marker, helpers + marker, 1)
+main.write_text(k)
+print("Restored recognizeBest and image enhancement helpers.")
