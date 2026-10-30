@@ -1807,3 +1807,20 @@ if optional_rule not in current_rules:
     rules.parent.mkdir(parents=True, exist_ok=True)
     rules.write_text(current_rules.rstrip() + "\n" + optional_rule + "\n")
 print("Configured R8 for PDFBox's optional JPEG2000 decoder.")
+
+
+# Correct the PDF text-layer digit regex. Four backslashes in the Kotlin
+# source compile to a literal backslash+d regex, preventing extraction of
+# digit sequences from searchable PDFs and forcing unnecessary OCR fallback.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+bad = r'Regex("(?<!\\\\d)\\\\d{11}(?!\\\\d)")'
+good = r'Regex("(?<!\\d)\\d{11}(?!\\d)")'
+if bad in k:
+    k = k.replace(bad, good)
+    main.write_text(k)
+    print("Fixed PDF text-layer 11-digit extraction regex.")
+elif good in k:
+    print("PDF text-layer 11-digit extraction regex already correct.")
+else:
+    raise SystemExit("PDF digit regex did not match known safe forms; refusing to build.")
