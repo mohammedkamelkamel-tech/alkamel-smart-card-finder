@@ -2294,3 +2294,26 @@ replace_required(
 
 main.write_text(k)
 print("Variable-length card-number support applied. Replacements:", changes)
+
+
+# Move the total inventory count below the denomination breakdown.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+old_badge = '''        header.addView(TextView(this).apply {
+            text = "🛡 " + db.count(); textSize = 16f; gravity = Gravity.CENTER
+            setTextColor(gold); background = bg(0xFF20283A.toInt()); setPadding(12, 12, 12, 12)
+        })
+'''
+if old_badge in k:
+    k = k.replace(old_badge, "", 1)
+grid_anchor = "        stats.addView(statsGrid)\n"
+if grid_anchor not in k:
+    raise SystemExit("Cannot find denomination stock grid to place total count below it.")
+if "إجمالي الكروت المضافة:" not in k:
+    k = k.replace(grid_anchor, grid_anchor + '''        stats.addView(txt("إجمالي الكروت المضافة: " + db.count() + " كرت", 17f, 0xFFFFFFFF.toInt(), true).apply {
+            gravity = Gravity.CENTER
+            setPadding(8, 12, 8, 6)
+        })
+''', 1)
+main.write_text(k)
+print("Moved total card count below denomination counts.")
