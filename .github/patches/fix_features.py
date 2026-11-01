@@ -122,7 +122,7 @@ s = s[:a] + '''    private fun readTextNumbers(uri: Uri, cat: String, name: Stri
         val text = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
             ?: throw IllegalStateException("تعذر قراءة الملف")
         val normalized = normalizeDigits(text)
-        val matches = Regex("(?<!\\\\d)\\\\d{11}(?!\\\\d)").findAll(normalized).map { it.value }.distinct().toList()
+        val matches = Regex("(?<!\\\\d)\\\\d{10,11}(?!\\\\d)").findAll(normalized).map { it.value }.distinct().toList()
         val batches = matches.chunked(500)
         var added = 0
         batches.forEachIndexed { index, batch ->
@@ -1034,7 +1034,7 @@ pdf_method = '''    private suspend fun readPdfNumbers(uri: Uri, cat: String, na
                     val pdfText = PDFTextStripper().getText(document)
                     val normalized = normalizeDigits(pdfText)
                     extracted.addAll(
-                        Regex("(?<!\\\\\\\\d)\\\\\\\\d{11}(?!\\\\\\\\d)")
+                        Regex("(?<!\\\\\\\\d)\\\\\\\\d{10,11}(?!\\\\\\\\d)")
                             .findAll(normalized).map { it.value }
                     )
                     textLayerRead = extracted.isNotEmpty()
@@ -1063,7 +1063,7 @@ pdf_method = '''    private suspend fun readPdfNumbers(uri: Uri, cat: String, na
                                 val recognized = recognizeBest(bitmap)
                                 val normalized = normalizeDigits(recognized)
                                 extracted.addAll(
-                                    Regex("(?<!\\\\\\\\d)\\\\\\\\d{11}(?!\\\\\\\\d)")
+                                    Regex("(?<!\\\\\\\\d)\\\\\\\\d{10,11}(?!\\\\\\\\d)")
                                         .findAll(normalized).map { it.value }
                                 )
                             } finally { bitmap.recycle() }
@@ -1814,8 +1814,8 @@ print("Configured R8 for PDFBox's optional JPEG2000 decoder.")
 # digit sequences from searchable PDFs and forcing unnecessary OCR fallback.
 main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
 k = main.read_text()
-bad = r'Regex("(?<!\\\\d)\\\\d{11}(?!\\\\d)")'
-good = r'Regex("(?<!\\d)\\d{11}(?!\\d)")'
+bad = r'Regex("(?<!\\\\d)\\\\d{10,11}(?!\\\\d)")'
+good = r'Regex("(?<!\\d)\\d{10,11}(?!\\d)")'
 if bad in k:
     k = k.replace(bad, good)
     main.write_text(k)
