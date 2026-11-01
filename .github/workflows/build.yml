@@ -1,25 +1,48 @@
-name: Unzip and Build APK
+name: Build Latest Modified Project
 
 on:
   push:
-    paths:
-      - 'alkamel-smart-card-finder-project.zip'
-      - '.github/workflows/build.yml'
-      - '.github/patches/**'
+    branches:
+      - main
   workflow_dispatch:
+
+# Keep only the newest requested build; cancel builds for older commits.
+concurrency:
+  group: latest-project-build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout latest pushed project revision
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
 
-      - name: Unzip project
+      - name: Select and extract latest modified project archive
+        shell: bash
         run: |
-          unzip -o alkamel-smart-card-finder-project.zip -d extracted
-          cp -R extracted/alkamel-smart-card-finder/. .
+          set -euo pipefail
+          PROJECT_ZIP="$(git ls-files '*.zip' | while IFS= read -r file; do
+            printf '%s\t%s\n' "$(git log -1 --format=%ct -- "$file")" "$file"
+          done | sort -nr | head -n1 | cut -f2-)"
+          if [ -z "${PROJECT_ZIP}" ] || [ ! -f "${PROJECT_ZIP}" ]; then
+            echo "No project ZIP archive found in the latest commit."
+            exit 1
+          fi
+          echo "Building project archive: ${PROJECT_ZIP}"
+          rm -rf extracted
+          mkdir -p extracted
+          unzip -o "${PROJECT_ZIP}" -d extracted
+          PROJECT_DIR="$(find extracted -mindepth 1 -maxdepth 3 -type f -name settings.gradle -o -name settings.gradle.kts | head -n1 | xargs -r dirname)"
+          if [ -z "${PROJECT_DIR}" ]; then
+            echo "Could not locate Gradle project inside ${PROJECT_ZIP}"
+            exit 1
+          fi
+          cp -R "${PROJECT_DIR}/." .
 
       - name: Patch Kotlin compile errors
         run: |
@@ -27,9 +50,13 @@ jobs:
           from pathlib import Path
           import re
           p = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+          if not p.exists():
+              raise SystemExit("MainActivity.kt not found in selected project archive")
           s = p.read_text()
-          s, n1 = re.subn(r'\bsingleLine\s*=\s*true\b', 'setSingleLine(true)', s)
-          s, n2 = s.replace('takePicture.launch(cameraUri)', 'takePicture.launch(cameraUri ?: return)'), s.count('takePicture.launch(cameraUri)')
+          s, n1 = re.subn(r'\\bsingleLine\\s*=\\s*true\\b', 'setSingleLine(true)', s)
+          old = 'takePicture.launch(cameraUri)'
+          n2 = s.count(old)
+          s = s.replace(old, 'takePicture.launch(cameraUri ?: return)')
           p.write_text(s)
           print(f"Fixed singleLine occurrences: {n1}")
           print(f"Fixed nullable cameraUri launches: {n2}")
@@ -52,9 +79,9 @@ jobs:
       - name: Build APK
         run: gradle assembleDebug
 
-      # Package the exact patched source used for this successful build.
       - name: Create project and APK bundle
         run: |
+          set -euo pipefail
           mkdir -p release_bundle
           cp app/build/outputs/apk/debug/*.apk release_bundle/application.apk
           zip -qr release_bundle/project.zip . \
@@ -67,3 +94,4 @@ jobs:
         with:
           name: alkamel-smart-card-finder-project-and-apk
           path: alkamel-smart-card-finder-package.zip
+          if-no-files-found: error
