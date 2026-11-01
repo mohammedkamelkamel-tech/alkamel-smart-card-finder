@@ -2276,7 +2276,8 @@ replace_required(
 )
 replace_required(
     "fragments.filter { it.length == 11 }.forEach { number ->",
-    "fragments.filter { it.isNotEmpty() }.forEach { number ->"
+    "fragments.filter { it.isNotEmpty() }.forEach { number ->",
+    0
 )
 replace_required(
     "(11 - fragment.length)",
