@@ -2229,3 +2229,65 @@ k = k.replace('hint = "اكتب رقم الكرت الناقص هنا"; textSize
               'hint = "اكتب رقم الكرت الناقص هنا"; textSize = 16f; setSingleLine(true)', 1)
 main.write_text(k)
 print("Resized only the logo to 200dp and reduced search hint font to 16sp.")
+
+
+# Accept card numbers of variable length instead of requiring exactly 11 digits.
+# Keep numbers as strings so leading zeroes are preserved.
+main = Path("app/src/main/java/com/alkamel/cardfinder/MainActivity.kt")
+k = main.read_text()
+changes = 0
+
+def replace_required(old: str, new: str, minimum: int = 1):
+    global k, changes
+    count = k.count(old)
+    if count < minimum:
+        raise SystemExit("Variable-length card-number patch anchor missing: " + old[:100])
+    k = k.replace(old, new)
+    changes += count
+
+replace_required(
+    "if (number.length == 11 && number.all { it in '0'..'9' }) {",
+    "if (number.isNotEmpty() && number.all { it in '0'..'9' }) {"
+)
+replace_required(
+    ".filter { it.length >= 4 && it.length <= 11 }",
+    ".filter { it.length >= 4 }"
+)
+replace_required(
+    "if (joined.length !in 7..11) continue",
+    "if (joined.length < 7) continue"
+)
+replace_required(
+    "if (fragment.length > 11) continue",
+    "if (fragment.isEmpty()) continue",
+    1
+)
+# The first OCR implementation has two such guards; remove the remaining fixed-length guard too.
+replace_required(
+    "if (fragment.length > 11) continue",
+    "if (fragment.isEmpty()) continue",
+    1
+)
+replace_required(
+    "if (first.length < 3 || second.length < 3 || first.length + second.length > 11) continue",
+    "if (first.length < 3 || second.length < 3) continue"
+)
+replace_required(
+    "fragments.filter { it.length == 11 }.forEach { number ->",
+    "fragments.filter { it.isNotEmpty() }.forEach { number ->"
+)
+replace_required(
+    "(11 - fragment.length)",
+    "maxOf(0, 64 - fragment.length)"
+)
+replace_required(
+    "(11 - joined.length)",
+    "maxOf(0, 64 - joined.length)"
+)
+replace_required(
+    "لم يتم العثور على أرقام كروت من 11 خانة في الملف",
+    "لم يتم العثور على أرقام كروت في الملف"
+)
+
+main.write_text(k)
+print("Variable-length card-number support applied. Replacements:", changes)
