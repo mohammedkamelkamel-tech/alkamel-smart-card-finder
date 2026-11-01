@@ -6,7 +6,6 @@ on:
       - main
   workflow_dispatch:
 
-# Keep only the newest requested build; cancel builds for older commits.
 concurrency:
   group: latest-project-build-${{ github.ref }}
   cancel-in-progress: true
@@ -14,7 +13,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout latest pushed project revision
         uses: actions/checkout@v4
@@ -37,7 +35,7 @@ jobs:
           rm -rf extracted
           mkdir -p extracted
           unzip -o "${PROJECT_ZIP}" -d extracted
-          PROJECT_DIR="$(find extracted -mindepth 1 -maxdepth 3 -type f -name settings.gradle -o -name settings.gradle.kts | head -n1 | xargs -r dirname)"
+          PROJECT_DIR="$(find extracted -mindepth 1 -maxdepth 3 -type f \( -name settings.gradle -o -name settings.gradle.kts \) | head -n1 | xargs -r dirname)"
           if [ -z "${PROJECT_DIR}" ]; then
             echo "Could not locate Gradle project inside ${PROJECT_ZIP}"
             exit 1
@@ -53,7 +51,7 @@ jobs:
           if not p.exists():
               raise SystemExit("MainActivity.kt not found in selected project archive")
           s = p.read_text()
-          s, n1 = re.subn(r'\\bsingleLine\\s*=\\s*true\\b', 'setSingleLine(true)', s)
+          s, n1 = re.subn(r'\bsingleLine\s*=\s*true\b', 'setSingleLine(true)', s)
           old = 'takePicture.launch(cameraUri)'
           n2 = s.count(old)
           s = s.replace(old, 'takePicture.launch(cameraUri ?: return)')
@@ -65,40 +63,20 @@ jobs:
       - name: Apply image OCR and import progress improvements
         run: python3 .github/patches/fix_features.py
 
-      - name: Configure permanent APK signing
+      - name: Set application version code
         env:
-          ALKAMEL_KEYSTORE_BASE64: ${{ secrets.ALKAMEL_KEYSTORE_BASE64 }}
-          ALKAMEL_KEYSTORE_PASSWORD: ${{ secrets.ALKAMEL_KEYSTORE_PASSWORD }}
-          ALKAMEL_KEY_ALIAS: ${{ secrets.ALKAMEL_KEY_ALIAS }}
-          ALKAMEL_KEY_PASSWORD: ${{ secrets.ALKAMEL_KEY_PASSWORD }}
           APP_VERSION_CODE: ${{ github.run_number }}
         run: |
-          set -euo pipefail
-          if [ -z "${ALKAMEL_KEYSTORE_BASE64}" ] || [ -z "${ALKAMEL_KEYSTORE_PASSWORD}" ] || [ -z "${ALKAMEL_KEY_ALIAS}" ] || [ -z "${ALKAMEL_KEY_PASSWORD}" ]; then
-            echo "::error::Permanent signing secrets are missing. Add ALKAMEL_KEYSTORE_BASE64, ALKAMEL_KEYSTORE_PASSWORD, ALKAMEL_KEY_ALIAS, and ALKAMEL_KEY_PASSWORD in repository Actions secrets."
-            exit 1
-          fi
-          echo "${ALKAMEL_KEYSTORE_BASE64}" | base64 --decode > alkamel-release.jks
           python3 - <<'PY'
           from pathlib import Path
-          import os
+          import os, re
           p = Path("app/build.gradle")
           s = p.read_text()
-          s = s.replace('versionCode 1', 'versionCode ' + os.environ['APP_VERSION_CODE'])
-          if 'signingConfigs {' not in s:
-              block = """    signingConfigs {
-                  stable {
-                      storeFile rootProject.file('alkamel-release.jks')
-                      storePassword System.getenv('ALKAMEL_KEYSTORE_PASSWORD')
-                      keyAlias System.getenv('ALKAMEL_KEY_ALIAS')
-                      keyPassword System.getenv('ALKAMEL_KEY_PASSWORD')
-                  }
-              }
-          """
-              s = s.replace('    buildTypes {', block + '    buildTypes {', 1)
-          s = s.replace('        debug {', '        debug {\n            signingConfig signingConfigs.stable', 1)
+          s, n = re.subn(r'versionCode\s+\d+', 'versionCode ' + os.environ['APP_VERSION_CODE'], s, count=1)
+          if n == 0:
+              raise SystemExit("Could not find versionCode in app/build.gradle")
           p.write_text(s)
-          print('Configured stable APK signing and versionCode', os.environ['APP_VERSION_CODE'])
+          print("Set versionCode", os.environ['APP_VERSION_CODE'])
           PY
 
       - name: Set up Java
