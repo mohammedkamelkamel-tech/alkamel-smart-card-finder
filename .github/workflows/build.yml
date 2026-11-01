@@ -65,6 +65,42 @@ jobs:
       - name: Apply image OCR and import progress improvements
         run: python3 .github/patches/fix_features.py
 
+      - name: Configure permanent APK signing
+        env:
+          ALKAMEL_KEYSTORE_BASE64: ${{ secrets.ALKAMEL_KEYSTORE_BASE64 }}
+          ALKAMEL_KEYSTORE_PASSWORD: ${{ secrets.ALKAMEL_KEYSTORE_PASSWORD }}
+          ALKAMEL_KEY_ALIAS: ${{ secrets.ALKAMEL_KEY_ALIAS }}
+          ALKAMEL_KEY_PASSWORD: ${{ secrets.ALKAMEL_KEY_PASSWORD }}
+          APP_VERSION_CODE: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ALKAMEL_KEYSTORE_BASE64}" ] || [ -z "${ALKAMEL_KEYSTORE_PASSWORD}" ] || [ -z "${ALKAMEL_KEY_ALIAS}" ] || [ -z "${ALKAMEL_KEY_PASSWORD}" ]; then
+            echo "::error::Permanent signing secrets are missing. Add ALKAMEL_KEYSTORE_BASE64, ALKAMEL_KEYSTORE_PASSWORD, ALKAMEL_KEY_ALIAS, and ALKAMEL_KEY_PASSWORD in repository Actions secrets."
+            exit 1
+          fi
+          echo "${ALKAMEL_KEYSTORE_BASE64}" | base64 --decode > alkamel-release.jks
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p = Path("app/build.gradle")
+          s = p.read_text()
+          s = s.replace('versionCode 1', 'versionCode ' + os.environ['APP_VERSION_CODE'])
+          if 'signingConfigs {' not in s:
+              block = """    signingConfigs {
+                  stable {
+                      storeFile rootProject.file('alkamel-release.jks')
+                      storePassword System.getenv('ALKAMEL_KEYSTORE_PASSWORD')
+                      keyAlias System.getenv('ALKAMEL_KEY_ALIAS')
+                      keyPassword System.getenv('ALKAMEL_KEY_PASSWORD')
+                  }
+              }
+          """
+              s = s.replace('    buildTypes {', block + '    buildTypes {', 1)
+          s = s.replace('        debug {', '        debug {\n            signingConfig signingConfigs.stable', 1)
+          p.write_text(s)
+          print('Configured stable APK signing and versionCode', os.environ['APP_VERSION_CODE'])
+          PY
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
