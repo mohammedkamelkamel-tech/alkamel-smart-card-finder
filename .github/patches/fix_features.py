@@ -2271,7 +2271,8 @@ replace_required(
 )
 replace_required(
     "if (first.length < 3 || second.length < 3 || first.length + second.length > 11) continue",
-    "if (first.length < 3 || second.length < 3) continue"
+    "if (first.length < 3 || second.length < 3) continue",
+    0
 )
 replace_required(
     "fragments.filter { it.length == 11 }.forEach { number ->",
