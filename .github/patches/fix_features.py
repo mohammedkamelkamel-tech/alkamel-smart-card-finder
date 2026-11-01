@@ -2257,16 +2257,17 @@ replace_required(
     "if (joined.length !in 7..11) continue",
     "if (joined.length < 7) continue"
 )
+# These guards existed in an older project archive. Newer archives may
+# already have removed them, so their absence must not abort the build.
 replace_required(
     "if (fragment.length > 11) continue",
     "if (fragment.isEmpty()) continue",
-    1
+    0
 )
-# The first OCR implementation has two such guards; remove the remaining fixed-length guard too.
 replace_required(
     "if (fragment.length > 11) continue",
     "if (fragment.isEmpty()) continue",
-    1
+    0
 )
 replace_required(
     "if (first.length < 3 || second.length < 3 || first.length + second.length > 11) continue",
